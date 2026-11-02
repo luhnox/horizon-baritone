@@ -284,7 +284,7 @@ impl Process for BuilderProcess {
         let Some(feet) = core.player_feet(game) else {
             return PathingCommand::Defer;
         };
-        for (pos, _) in std::mem::take(&mut core.pathing.broken) {
+        for (pos, _) in std::mem::take(&mut core.dig.broken) {
             self.broken += 1;
             self.tries.remove(&pos);
         }
@@ -388,7 +388,7 @@ impl Process for BuilderProcess {
         let target = dig_at.unwrap_or(self.wrong[index].pos);
         let reach = ReachGoal { target };
         // In reach: act.
-        if reach.is_in_goal(feet) && core.pathing.dig.is_none() && !core.pathing.paused {
+        if reach.is_in_goal(feet) && core.dig.active.is_none() && !core.user_paused {
             match &self.wrong[index].need {
                 Need::Break => {
                     let n = self.tries.entry(target).or_insert(0);
@@ -420,7 +420,7 @@ impl Process for BuilderProcess {
                         if *n > 10 {
                             self.blacklist.insert(target, tick + 400);
                             self.tries.remove(&target);
-                            let why = std::mem::take(&mut core.pathing.aim_error);
+                            let why = std::mem::take(&mut core.dig.aim_error);
                             core.say_red(game, &format!("A block would not go down at {}, {}, {}: skipping it for now. {why}", target[0], target[1], target[2]));
                         }
                     }

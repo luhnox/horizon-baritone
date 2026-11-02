@@ -50,4 +50,16 @@ impl Game<'_> {
         let dir = super::super::view_vector(self.yaw, self.pitch);
         self.clip_ray(eye, dir, 64.0).map(|hit| hit.pos)
     }
+    /// The player's eyes, and how far a hand reaches.
+    pub(in crate::game) fn bar_eye(&self) -> Option<[f64; 3]> {
+        self.eye_position()
+    }
+    pub(in crate::game) fn bar_reach(&self) -> f64 {
+        self.reach()
+    }
+    /// The block an aim hits from `eye` within `reach`, and the face hit (RayTraceUtils.rayTraceTowards).
+    pub(in crate::game) fn bar_ray(&self, eye: [f64; 3], yaw: f32, pitch: f32, reach: f64) -> Option<([i32; 3], [i32; 3])> {
+        let dir = super::super::view_vector(yaw, pitch);
+        self.clip_ray(eye, dir, reach).map(|hit| (hit.pos, hit.face))
+    }
 }

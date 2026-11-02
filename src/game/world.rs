@@ -85,11 +85,12 @@ pub fn classify(game: &Game<'_>, state: BlockStateId) -> Cell {
     }
 }
 
-/// The ticks to break `state` with the best of what is in the hotbar (or the held item alone, when
-/// the tool is not chosen), and which slot that is.
-pub fn best_tool(game: &Game<'_>, state: BlockStateId, auto_tool: bool) -> Option<(f64, Option<usize>)> {
+/// baritone.utils.ToolSet.getStrVsBlock: how much of the block one tick of the best tool at hand breaks
+/// (the breaking progress per tick, not rounded to whole ticks), and which hotbar slot that tool is in.
+/// None when nothing can break it.
+pub fn break_progress(game: &Game<'_>, state: BlockStateId, auto_tool: bool) -> Option<(f64, Option<usize>)> {
     let facts = game.res.facts().get(state);
-    if facts.hardness < 0.0 || facts.block_entity || facts.fluid != Fluid::None {
+    if facts.hardness < 0.0 {
         return None;
     }
     if facts.hardness == 0.0 {
@@ -103,19 +104,32 @@ pub fn best_tool(game: &Game<'_>, state: BlockStateId, auto_tool: bool) -> Optio
     for (stack, slot) in candidates {
         let speed = f64::from(items.mining_speed(stack, &facts.name));
         let harvest = !facts.requires_tool || items.correct_for_drops(stack, &facts.name);
-        if facts.requires_tool && !harvest {
-            continue;
-        }
         let progress = speed / f64::from(facts.hardness) / if harvest { 30.0 } else { 100.0 };
-        if progress <= 0.0 {
-            continue;
-        }
-        let ticks = (1.0 / progress).ceil();
-        if best.is_none_or(|(b, _)| ticks < b) {
-            best = Some((ticks, slot));
+        if progress > 0.0 && best.is_none_or(|(b, _)| progress > b) {
+            best = Some((progress, slot));
         }
     }
     best
+}
+
+/// The ticks to break `state` with the best of what is in the hotbar (or the held item alone, when
+/// the tool is not chosen), and which slot that is. None for what is not worth breaking: a fluid, or
+/// a block no tool at hand can harvest.
+pub fn best_tool(game: &Game<'_>, state: BlockStateId, auto_tool: bool) -> Option<(f64, Option<usize>)> {
+    let facts = game.res.facts().get(state);
+    if facts.block_entity || facts.fluid != Fluid::None {
+        return None;
+    }
+    let (progress, slot) = break_progress(game, state, auto_tool)?;
+    // Whole ticks, and a block that requires a tool nothing at hand harvests is skipped, as before.
+    if facts.requires_tool && facts.hardness > 0.0 {
+        let items = game.res.items();
+        let stacks = std::iter::once(None).chain((0..9).map(|i| game.inventory.get(i).and_then(Option::as_ref)));
+        if !stacks.into_iter().any(|st| items.correct_for_drops(st, &facts.name)) {
+            return None;
+        }
+    }
+    Some(((1.0 / progress).ceil(), slot))
 }
 
 pub fn block_name(game: &Game<'_>, p: Pos) -> String {

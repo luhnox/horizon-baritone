@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 fn state(name: &str, classes: &[&str], full: bool, hardness: f32) -> Rc<BlockState> {
     Rc::new(BlockState {
+        id: 0,
         name: Arc::from(format!("minecraft:{name}")),
         classes: Class::flags_of(classes.iter().copied()),
         props: parse_props(name),

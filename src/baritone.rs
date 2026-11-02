@@ -16,7 +16,8 @@ use super::baritone_p_follow::FollowProcess;
 use super::baritone_p_getto::GetToBlockProcess;
 use super::baritone_p_goal::CustomGoalProcess;
 use super::baritone_p_mine::MineProcess;
-use super::baritone_pathing::{PathingCommand, PathingState, Process};
+use super::baritone_pathing::{DigState, PathingCommand, Process};
+use super::baritone_pathing_behavior::PathingBehavior;
 use super::baritone_selection::SelectionManager;
 use super::baritone_settings::{self as settings, Settings};
 use super::baritone_utils::{feet_of, Pos};
@@ -52,7 +53,8 @@ pub struct Mlg {
 pub struct Core {
     pub settings: Settings,
     pub input: Input,
-    pub pathing: PathingState,
+    pub pathing: PathingBehavior,
+    pub dig: DigState,
     pub cache: WorldCache,
     pub selections: SelectionManager,
     /// The first corner of a selection being made (#sel pos1).
@@ -80,7 +82,8 @@ impl Core {
         let mut core = Self {
             settings,
             input: Input::default(),
-            pathing: PathingState::default(),
+            pathing: PathingBehavior::new(),
+            dig: DigState::default(),
             cache: WorldCache::default(),
             selections: SelectionManager::default(),
             sel_pos1: None,
@@ -418,51 +421,46 @@ impl Baritone {
         self.core.was_dead = dead;
     }
 
-    /// baritone.utils.PathingControlManager: ask the active processes, highest priority first; the
-    /// first with something to say is in control, and the rest are told they lost it.
+    /// baritone.utils.PathingControlManager.executeProcesses and preTick/postTick: ask the active
+    /// processes, highest priority first; the first with something to say is in control and the rest are
+    /// told they lost it. The pathing behavior then does what that process asked.
     fn control_tick(&mut self, game: &mut Game<'_>) {
-        let calc_failed = self.core.pathing.calc_failed;
-        let safe = self.core.pathing_safe_to_cancel(game);
         let Baritone { core, procs, in_control, last_command } = self;
-        let previous = *in_control;
+        let last_tick = *in_control;
+        let calc_failed = core.pathing.calc_failed_last_tick();
+        let safe = core.pathing_safe_to_cancel();
         let mut command: Option<PathingCommand> = None;
         let mut now: Option<&'static str> = None;
+        let mut lost: Vec<&'static str> = Vec::new();
         for p in procs.ordered() {
-            if !p.is_active() {
-                if previous == Some(p.name()) {
-                    p.on_lost_control(core, game);
-                }
-                continue;
-            }
-            let cmd = p.on_tick(core, game, calc_failed, safe);
             if command.is_some() {
-                if previous == Some(p.name()) {
-                    p.on_lost_control(core, game);
+                if p.is_active() {
+                    lost.push(p.name());
                 }
                 continue;
             }
+            if !p.is_active() {
+                continue;
+            }
+            let cmd = p.on_tick(core, game, last_tick == Some(p.name()) && calc_failed, safe);
             if !matches!(cmd, PathingCommand::Defer) {
-                command = Some(cmd);
                 now = Some(p.name());
+                command = Some(cmd);
+            }
+        }
+        for p in procs.ordered() {
+            if lost.contains(&p.name()) || (last_tick == Some(p.name()) && now != Some(p.name()) && !p.is_active()) {
+                p.on_lost_control(core, game);
             }
         }
         *in_control = now;
-        match command {
-            Some(cmd) => {
-                *last_command = Some(cmd.describe());
-                core.pathing_command(game, cmd)
-            }
-            None => {
-                // Nobody wants to go anywhere: a path left over is dropped once it is safe to.
-                if previous.is_some() && core.pathing_safe_to_cancel(game) {
-                    core.pathing_cancel(game);
-                }
-            }
+        *last_command = command.as_ref().map(PathingCommand::describe);
+        // Control changed from one real process to another that wants to do something.
+        let changed = now != last_tick && last_tick.is_some() && now.is_some();
+        let lines = core.path_tick(game, command.as_ref(), changed);
+        for line in lines {
+            core.say(game, &line);
         }
-        if core.user_paused {
-            core.pathing.paused = true;
-        }
-        core.pathing_tick(game);
     }
 }
 

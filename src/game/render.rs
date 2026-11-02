@@ -25,7 +25,7 @@ pub fn lines(b: &Baritone, game: &Game<'_>, out: &mut Vec<Line>) {
 
     if s.flag("renderGoal") {
         // The goal in force, or the one set and not gone to yet.
-        let goal = pathing.goal.clone().or_else(|| b.procs.goal.goal().cloned());
+        let goal = pathing.goal().cloned().or_else(|| b.procs.goal.goal().cloned());
         if let Some(goal) = goal {
             let (good, bad) = (s.color("colorGoalBox"), s.color("colorInvertedGoalBox"));
             for shape in goal.shapes() {
@@ -49,20 +49,29 @@ pub fn lines(b: &Baritone, game: &Game<'_>, out: &mut Vec<Line>) {
     }
 
     if s.flag("renderPath") {
-        if let Some(ex) = pathing.executor.as_ref() {
-            let color = s.color("colorCurrentPath");
-            let rest = ex.remaining();
-            for w in rest[..rest.len().min(240)].windows(2) {
-                let p = |n: Pos| [f64::from(n[0]) + 0.5, f64::from(n[1]) + 0.08, f64::from(n[2]) + 0.5];
+        let (current_color, next_color) = (s.color("colorCurrentPath"), s.color("colorNextPath"));
+        let line_of = |g: &mut Gizmos, path: &[Pos], color: u32| {
+            let p = |n: Pos| [f64::from(n[0]) + 0.5, f64::from(n[1]) + 0.08, f64::from(n[2]) + 0.5];
+            for w in path.windows(2) {
                 g.line(p(w[0]), p(w[1]), color, 4.0);
             }
+        };
+        if let Some(ex) = pathing.current.as_ref() {
+            let from = ex.position().min(ex.path.positions.len());
+            let rest = &ex.path.positions[from..];
+            line_of(&mut g, &rest[..rest.len().min(240)], current_color);
+        }
+        if let Some(next) = pathing.next.as_ref() {
+            line_of(&mut g, &next.path.positions[..next.path.positions.len().min(240)], next_color);
         }
         let (break_color, place_color) = (s.color("colorBlocksToBreak"), s.color("colorBlocksToPlace"));
-        for p in pathing.marks.breaks.iter().filter(|p| !is_air_at(game, **p)).take(80) {
-            cube(&mut g, *p, break_color, 2.5);
-        }
-        for p in pathing.marks.places.iter().filter(|p| is_air_at(game, **p)).take(80) {
-            cube(&mut g, *p, place_color, 2.5);
+        if let Some(ex) = pathing.current.as_ref() {
+            for p in ex.to_break().iter().filter(|p| !is_air_at(game, **p)).take(80) {
+                cube(&mut g, *p, break_color, 2.5);
+            }
+            for p in ex.to_place().iter().filter(|p| is_air_at(game, **p)).take(80) {
+                cube(&mut g, *p, place_color, 2.5);
+            }
         }
         // What the processes are after.
         let mine_color = s.color("colorBlocksToBreak");

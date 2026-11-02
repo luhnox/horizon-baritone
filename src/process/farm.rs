@@ -109,7 +109,7 @@ impl Process for FarmProcess {
         let Some(feet) = core.player_feet(game) else {
             return PathingCommand::Defer;
         };
-        let broken = std::mem::take(&mut core.pathing.broken);
+        let broken = std::mem::take(&mut core.dig.broken);
         for (pos, _) in broken {
             self.harvested += 1;
             self.last_break = Some(pos);
@@ -160,7 +160,7 @@ impl Process for FarmProcess {
 
         match job {
             Job::Harvest(p) => {
-                if GoalGetToBlock(p).is_in_goal(feet) && core.pathing.dig.is_none() && !core.pathing.paused {
+                if GoalGetToBlock(p).is_in_goal(feet) && core.dig.active.is_none() && !core.user_paused {
                     self.tries += 1;
                     if self.tries > 6 || !core.start_dig(game, p) {
                         self.jobs.retain(|j| *j != job);

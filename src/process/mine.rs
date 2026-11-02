@@ -193,7 +193,7 @@ impl Process for MineProcess {
         let Some(feet) = core.player_feet(game) else {
             return PathingCommand::Defer;
         };
-        let broken = std::mem::take(&mut core.pathing.broken);
+        let broken = std::mem::take(&mut core.dig.broken);
         for (pos, name) in broken {
             if self.names.contains(&name) {
                 self.last_break = Some(pos);
@@ -258,7 +258,7 @@ impl Process for MineProcess {
         }
 
         // Shaft mining: an ore known in this column, level with the head or above it, is broken from here.
-        if !core.pathing.paused && core.pathing.dig.is_none() && game.player.as_ref().is_some_and(|p| p.ground.on_ground) {
+        if !core.user_paused && core.dig.active.is_none() && game.player.as_ref().is_some_and(|p| p.ground.on_ground) {
             let shaft = self
                 .known
                 .iter()

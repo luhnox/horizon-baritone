@@ -289,7 +289,7 @@ fn eta(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
         return Err(CommandError::new("No process in control"));
     }
     let segment = b.core.ticks_remaining_in_segment();
-    let goal = b.core.estimated_ticks_to_goal();
+    let goal = b.core.estimated_ticks_to_goal(game);
     b.core.say(game, &format!("Next segment: {}\n        Goal: {}", format_time(segment), format_time(goal)));
     if goal.is_some_and(|t| t.is_finite() && t >= 24_192_000.0) {
         b.core.say(game, "Please don't do this to me.");
@@ -400,7 +400,6 @@ fn resume(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
     }
     b.procs.build.resume();
     b.core.user_paused = false;
-    b.core.pathing.paused = false;
     b.core.say(game, "Resumed");
     Ok(())
 }

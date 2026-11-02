@@ -102,6 +102,8 @@ pub enum FluidKind {
 
 #[derive(Clone, Debug)]
 pub struct BlockState {
+    /// The game's id of the state (0 in tests).
+    pub id: u32,
     /// `minecraft:oak_slab`.
     pub name: Arc<str>,
     pub classes: u64,

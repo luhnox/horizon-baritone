@@ -5,7 +5,7 @@
 // tick (`NODES_PER_TICK`), with the Java's timeouts counted in ticks.
 use super::baritone_astar::{AStarPathFinder, Status};
 use super::baritone_calc_path::Path;
-use super::baritone_calculation_context::{CalculationContext, PlayerFacts, ToolSet};
+use super::baritone_calculation_context::{CalculationContext, ToolSet};
 use super::baritone_executor::{ExecEnv, PathExecutor};
 use super::baritone_goals::{rc, GoalRef, GoalXZ};
 use super::baritone_movement_helper as mh;
@@ -16,6 +16,39 @@ use std::collections::HashMap;
 
 /// How many nodes a search expands in one tick: about what the Java manages in a tick on its own thread.
 pub const NODES_PER_TICK: usize = 2500;
+
+/// What a process asks of the pathing behavior this tick (baritone.api.utils.PathingCommand).
+pub enum PathingCommand {
+    /// Head for the goal: search if there is no path, and walk it.
+    SetGoalAndPath(GoalRef),
+    /// Hold still and keep the path.
+    RequestPause,
+    /// Drop the path and take this goal.
+    CancelAndSetGoal(GoalRef),
+    /// Take this goal, and drop the path if it no longer leads there.
+    RevalidateGoalAndPath(GoalRef),
+    /// The same, and search at once.
+    ForceRevalidateGoalAndPath(GoalRef),
+    SetGoalAndPause(GoalRef),
+    /// This process has nothing to say: the next one decides.
+    Defer,
+}
+
+impl PathingCommand {
+    /// How `#proc` prints it.
+    pub fn describe(&self) -> String {
+        let (kind, goal) = match self {
+            PathingCommand::SetGoalAndPath(g) => ("SET_GOAL_AND_PATH", Some(g)),
+            PathingCommand::RequestPause => ("REQUEST_PAUSE", None),
+            PathingCommand::CancelAndSetGoal(g) => ("CANCEL_AND_SET_GOAL", Some(g)),
+            PathingCommand::RevalidateGoalAndPath(g) => ("REVALIDATE_GOAL_AND_PATH", Some(g)),
+            PathingCommand::ForceRevalidateGoalAndPath(g) => ("FORCE_REVALIDATE_GOAL_AND_PATH", Some(g)),
+            PathingCommand::SetGoalAndPause(g) => ("SET_GOAL_AND_PAUSE", Some(g)),
+            PathingCommand::Defer => ("DEFER", None),
+        };
+        format!("PathingCommand{{commandType={kind}, goal={}}}", goal.map_or("null".to_owned(), |g| g.label()))
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PathEvent {
@@ -213,15 +246,96 @@ impl PathingBehavior {
         feet
     }
 
-    /// onTick: one tick of the behavior (the dispatching of events is done at the end).
-    pub fn on_tick(&mut self, ctx: &dyn PlayerContext, settings: &Settings, tools: &dyn ToolSet, ticks: u64) {
+    /// The first half of onTick: dispatch the events of the last tick and work out where a path would start.
+    pub fn begin_tick(&mut self, ctx: &dyn PlayerContext, settings: &Settings, tools: &dyn ToolSet) {
         self.dispatch_events();
         let facts = ctx.calculation_facts();
         let calc = CalculationContext::new(settings, ctx.bsi(), tools, &facts);
         self.expected_segment_start = Self::path_start(ctx, &calc);
+    }
+
+    /// The second half of onTick, after the control manager's preTick: walk the path.
+    pub fn run_tick(&mut self, ctx: &dyn PlayerContext, settings: &Settings, tools: &dyn ToolSet, ticks: u64) {
+        let facts = ctx.calculation_facts();
+        let calc = CalculationContext::new(settings, ctx.bsi(), tools, &facts);
         self.tick_path(ctx, settings, &calc, ticks);
         self.ticks_elapsed_so_far += 1;
         self.dispatch_events();
+    }
+
+    /// PathingControlManager.preTick, given what `executeProcesses` returned.
+    pub fn pre_tick(&mut self, ctx: &dyn PlayerContext, settings: &Settings, command: Option<&PathingCommand>, real_process_changed: bool, ticks: u64) {
+        let Some(command) = command else {
+            self.cancel_segment_if_safe(ctx);
+            self.secret_internal_set_goal(None);
+            return;
+        };
+        if real_process_changed && !matches!(command, PathingCommand::RequestPause) {
+            // Control changed from a real process to another real process that wants to do something: get
+            // rid of the in-progress stuff from the last process.
+            self.cancel_segment_if_safe(ctx);
+        }
+        match command {
+            PathingCommand::SetGoalAndPause(g) => {
+                self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), ticks);
+                self.request_pause();
+            }
+            PathingCommand::RequestPause => self.request_pause(),
+            PathingCommand::CancelAndSetGoal(g) => {
+                self.secret_internal_set_goal(Some(g.clone()));
+                self.cancel_segment_if_safe(ctx);
+            }
+            PathingCommand::ForceRevalidateGoalAndPath(g) | PathingCommand::RevalidateGoalAndPath(g) => {
+                if !self.is_pathing() && !self.is_calculating() {
+                    self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), ticks);
+                }
+            }
+            PathingCommand::SetGoalAndPath(g) => {
+                self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), ticks);
+            }
+            PathingCommand::Defer => {}
+        }
+    }
+
+    /// PathingControlManager.postTick: after the path has been walked, cancel and recalculate if the goal changed.
+    pub fn post_tick(&mut self, ctx: &dyn PlayerContext, settings: &Settings, command: Option<&PathingCommand>, ticks: u64) {
+        match command {
+            Some(PathingCommand::ForceRevalidateGoalAndPath(g)) => {
+                if self.force_revalidate(g) || self.revalidate_goal(g) {
+                    self.soft_cancel_if_safe();
+                }
+                self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), ticks);
+            }
+            Some(PathingCommand::RevalidateGoalAndPath(g)) => {
+                if settings.flag("cancelOnGoalInvalidation") && self.revalidate_goal(g) {
+                    self.soft_cancel_if_safe();
+                }
+                self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), ticks);
+            }
+            _ => {}
+        }
+    }
+
+    /// PathingControlManager.forceRevalidate.
+    fn force_revalidate(&self, new_goal: &GoalRef) -> bool {
+        let Some(current) = &self.current else { return false };
+        if new_goal.is_in_goal(current.path.dest()) {
+            return false;
+        }
+        new_goal.label() != current.path.goal.label()
+    }
+
+    /// PathingControlManager.revalidateGoal: the path used to end in the goal and no longer would.
+    fn revalidate_goal(&self, new_goal: &GoalRef) -> bool {
+        let Some(current) = &self.current else { return false };
+        let end = current.path.dest();
+        current.path.goal.is_in_goal(end) && !new_goal.is_in_goal(end)
+    }
+
+    /// One whole tick with no control manager in between (the tests).
+    pub fn on_tick(&mut self, ctx: &dyn PlayerContext, settings: &Settings, tools: &dyn ToolSet, ticks: u64) {
+        self.begin_tick(ctx, settings, tools);
+        self.run_tick(ctx, settings, tools, ticks);
     }
 
     fn dispatch_events(&mut self) {
@@ -549,5 +663,3 @@ impl PathingBehavior {
     }
 }
 
-#[allow(dead_code)]
-fn _unused(_: &dyn ToolSet, _: &PlayerFacts) {}

@@ -33,24 +33,6 @@ name = "baritone_legacy_helper"
 source = "src/pathing/helper.rs"
 
 [[module]]
-id = "mod_legacy_movement"
-file = "crates/horizon-client/src/game.rs"
-name = "baritone_legacy_movement"
-source = "src/pathing/movement.rs"
-
-[[module]]
-id = "mod_legacy_calc"
-file = "crates/horizon-client/src/game.rs"
-name = "baritone_legacy_calc"
-source = "src/pathing/calc.rs"
-
-[[module]]
-id = "mod_legacy_path"
-file = "crates/horizon-client/src/game.rs"
-name = "baritone_legacy_path"
-source = "src/pathing/path.rs"
-
-[[module]]
 id = "mod_settings"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_settings"
@@ -229,6 +211,12 @@ id = "mod_inventory"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_inventory"
 source = "src/behavior/inventory.rs"
+
+[[module]]
+id = "mod_game_ctx"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_game_ctx"
+source = "src/game/player_context.rs"
 
 [[module]]
 id = "mod_pathing"

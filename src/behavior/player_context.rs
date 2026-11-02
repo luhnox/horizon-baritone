@@ -3,7 +3,6 @@
 // player and the game while it runs. The game implements this; the movements are written against it, so
 // they can be tested with a player on paper. Every method takes `&self`: the implementation keeps the game
 // behind a cell, so the world can be read (through `bsi`) while the player is being steered.
-use super::baritone_block_state::BlockState;
 use super::baritone_block_state_interface::BlockStateInterface;
 use super::baritone_calculation_context::PlayerFacts;
 use super::baritone_movement_state::Input;
@@ -60,7 +59,7 @@ pub trait PlayerContext {
     /// InventoryBehavior.selectThrowawayForLocation.
     fn select_throwaway_for_location(&self, select: bool, x: i32, y: i32, z: i32) -> bool;
     /// MovementHelper.switchToBestToolFor.
-    fn switch_to_best_tool_for(&self, state: &BlockState);
+    fn switch_to_best_tool_for(&self, pos: Pos);
     fn water_bucket_hotbar_slot(&self) -> Option<usize>;
     fn empty_bucket_hotbar_slot(&self) -> Option<usize>;
     fn select_hotbar_slot(&self, slot: usize);

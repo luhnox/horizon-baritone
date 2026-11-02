@@ -283,7 +283,7 @@ impl Movement {
         }
         if ctx.is_in_wall() {
             if let Some(sel) = ctx.selected_block() {
-                ctx.switch_to_best_tool_for(&block_at(env, sel));
+                ctx.switch_to_best_tool_for(sel);
             }
             state.set_input(Input::ClickLeft, true);
         }
@@ -435,7 +435,7 @@ impl Movement {
             if !walk_through(env, p) {
                 // Cannot break air, so do not try.
                 something_in_the_way = true;
-                ctx.switch_to_best_tool_for(&block_at(env, p));
+                ctx.switch_to_best_tool_for(p);
                 if let Some(rot_towards_block) = ctx.reachable(p, ctx.block_reach_distance(), false) {
                     state.set_target(MovementTarget::new(rot_towards_block, true));
                     if ctx.is_looking_at(p) || ctx.player_rotations().is_really_close_to(rot_towards_block) {
@@ -590,7 +590,7 @@ impl Movement {
         // two blocks broken in a traverse are right on top of each other and have the same yaw.
         let yaw_to_dest = calc_rotation_from_vec3d(ctx.player_head(), block_pos_center(self.dest), ctx.player_rotations()).yaw;
         let mut pitch_to_break = target_rotation.pitch;
-        if (mh::is_block_normal_cube(&pb0) || pb0.is(Class::Air) && (mh::is_block_normal_cube(&pb1) || pb1.is(Class::Air))) {
+        if mh::is_block_normal_cube(&pb0) || pb0.is(Class::Air) && (mh::is_block_normal_cube(&pb1) || pb1.is(Class::Air)) {
             // Before we are right up against the block, we can break efficiently at this angle.
             pitch_to_break = 26.0;
         }

@@ -9,12 +9,6 @@ pub mod baritone_costs;
 pub mod baritone_goals;
 #[path = "pathing/helper.rs"]
 pub mod baritone_legacy_helper;
-#[path = "pathing/movement.rs"]
-pub mod baritone_legacy_movement;
-#[path = "pathing/calc.rs"]
-pub mod baritone_legacy_calc;
-#[path = "pathing/path.rs"]
-pub mod baritone_legacy_path;
 #[path = "api/settings.rs"]
 pub mod baritone_settings;
 #[path = "selection/selection.rs"]
