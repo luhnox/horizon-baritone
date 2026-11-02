@@ -759,7 +759,7 @@ impl Movement {
         let (src, dest) = (self.src, self.dest);
         let feet = ctx.player_feet();
         let dir = self.direction();
-        if feet == dest || feet == [dest[0] - dir.0, dest[1] - 1, dest[2] - dir.1] {
+        if feet == dest || feet == [dest[0] + dir.0, dest[1], dest[2] + dir.1] {
             state.set_status(MovementStatus::Success);
             return;
         }

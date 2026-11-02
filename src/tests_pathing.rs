@@ -239,3 +239,309 @@ fn a_star_finds_nothing_across_a_gap_with_no_blocks_and_no_parkour() {
         }
     }
 }
+
+#[test]
+fn a_star_runs_in_a_small_stack() {
+    // The game's main thread has a small stack: a search must not need a large one.
+    std::thread::Builder::new()
+        .stack_size(200 * 1024)
+        .spawn(|| {
+            let mut w = World::new();
+            w.floor(-2, 40);
+            let s = settings();
+            let c = ctx(&s, &w, &BareHands, &PlayerFacts::default());
+            let mut finder = AStarPathFinder::new([0, 64, 0], [0, 64, 0], rc(GoalBlock([30, 64, 2])), HashMap::new(), 1000, true);
+            let path = loop {
+                match finder.run(&c, 500) {
+                    Status::Running => {}
+                    Status::Done(p) => break p.post_process(&c),
+                    Status::Exhausted => panic!("no path"),
+                }
+            };
+            assert_eq!(path.dest(), [30, 64, 2]);
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+// ---- the whole behavior against a player on paper
+
+mod paper {
+    use super::*;
+    use crate::baritone_movement_state::Input;
+    use crate::baritone_pathing_behavior::{PathingBehavior, PathingCommand};
+    use crate::baritone_player_context::PlayerContext;
+    use crate::baritone_rotation::Rotation;
+    use crate::baritone_utils::Pos;
+    use std::cell::{Cell, RefCell};
+
+    pub struct Paper<'w> {
+        pub world: &'w World,
+        pub pos: Cell<[f64; 3]>,
+        pub yaw: Cell<f32>,
+        pub held: RefCell<Vec<Input>>,
+    }
+
+    impl<'w> Paper<'w> {
+        pub fn new(world: &'w World, pos: [f64; 3]) -> Self {
+            Self { world, pos: Cell::new(pos), yaw: Cell::new(0.0), held: RefCell::new(Vec::new()) }
+        }
+
+        /// One tick of walking on flat ground: the keys held move the player along the yaw.
+        pub fn physics(&self) {
+            let held = self.held.borrow().clone();
+            let mut p = self.pos.get();
+            if held.contains(&Input::MoveForward) {
+                let speed = if held.contains(&Input::Sprint) { 0.28 } else { 0.21 };
+                let yaw = f64::from(self.yaw.get()).to_radians();
+                p[0] += -yaw.sin() * speed;
+                p[2] += yaw.cos() * speed;
+            }
+            // Stepping up onto a block in the way (a jump, collapsed into one tick).
+            let feet = [p[0].floor() as i32, p[1].floor() as i32, p[2].floor() as i32];
+            if self.world.get0(feet[0], feet[1], feet[2]).full_collision {
+                p[1] = f64::from(feet[1] + 1);
+            }
+            if !self.world.get0(feet[0], feet[1] - 1, feet[2]).full_collision && !self.world.get0(feet[0], feet[1], feet[2]).full_collision {
+                p[1] = f64::from(feet[1] - 1) + 0.0;
+            }
+            self.pos.set(p);
+        }
+    }
+
+    impl PlayerContext for Paper<'_> {
+        fn bsi(&self) -> &dyn BlockStateInterface {
+            self.world
+        }
+        fn player_feet(&self) -> Pos {
+            let p = self.pos.get();
+            [p[0].floor() as i32, (p[1] + 0.0001).floor() as i32, p[2].floor() as i32]
+        }
+        fn position(&self) -> [f64; 3] {
+            self.pos.get()
+        }
+        fn player_head(&self) -> [f64; 3] {
+            let p = self.pos.get();
+            [p[0], p[1] + 1.62, p[2]]
+        }
+        fn delta_movement(&self) -> [f64; 3] {
+            [0.0; 3]
+        }
+        fn player_rotations(&self) -> Rotation {
+            Rotation::new(self.yaw.get(), 0.0)
+        }
+        fn on_ground(&self) -> bool {
+            true
+        }
+        fn is_in_water(&self) -> bool {
+            false
+        }
+        fn is_swimming(&self) -> bool {
+            false
+        }
+        fn is_under_water(&self) -> bool {
+            false
+        }
+        fn is_crouching(&self) -> bool {
+            false
+        }
+        fn horizontal_collision(&self) -> bool {
+            false
+        }
+        fn is_in_wall(&self) -> bool {
+            false
+        }
+        fn food_level(&self) -> i32 {
+            20
+        }
+        fn air_supply(&self) -> i32 {
+            300
+        }
+        fn max_air_supply(&self) -> i32 {
+            300
+        }
+        fn water_fluid_height(&self) -> f64 {
+            0.0
+        }
+        fn set_sprinting(&self, _on: bool) {}
+        fn is_nether(&self) -> bool {
+            false
+        }
+        fn is_looking_at(&self, _pos: Pos) -> bool {
+            false
+        }
+        fn selected_block(&self) -> Option<Pos> {
+            None
+        }
+        fn selected_face(&self) -> Option<[i32; 3]> {
+            None
+        }
+        fn block_reach_distance(&self) -> f64 {
+            4.5
+        }
+        fn reachable(&self, _pos: Pos, _reach: f64, _would_sneak: bool) -> Option<Rotation> {
+            None
+        }
+        fn ray_trace_towards(&self, _rotation: Rotation, _reach: f64, _would_sneak: bool) -> Option<(Pos, [i32; 3])> {
+            None
+        }
+        fn infer_sneaking_eye_position(&self) -> [f64; 3] {
+            self.player_head()
+        }
+        fn peek_rotation(&self, rotation: Rotation) -> Rotation {
+            rotation
+        }
+        fn calculation_facts(&self) -> PlayerFacts {
+            PlayerFacts { has_throwaway: false, has_water_bucket: false, can_sprint: true, ..PlayerFacts::default() }
+        }
+        fn has_generic_throwaway(&self) -> bool {
+            false
+        }
+        fn select_throwaway_for_location(&self, _select: bool, _x: i32, _y: i32, _z: i32) -> bool {
+            false
+        }
+        fn switch_to_best_tool_for(&self, _pos: Pos) {}
+        fn water_bucket_hotbar_slot(&self) -> Option<usize> {
+            None
+        }
+        fn empty_bucket_hotbar_slot(&self) -> Option<usize> {
+            None
+        }
+        fn select_hotbar_slot(&self, _slot: usize) {}
+        fn falling_block_near(&self, _pos: Pos) -> bool {
+            false
+        }
+        fn update_look_target(&self, rotation: Rotation, _force: bool) {
+            self.yaw.set(rotation.yaw);
+        }
+        fn clear_all_keys(&self) {
+            self.held.borrow_mut().clear();
+        }
+        fn set_input_force_state(&self, input: Input, forced: bool) {
+            let mut h = self.held.borrow_mut();
+            h.retain(|i| *i != input);
+            if forced {
+                h.push(input);
+            }
+        }
+        fn is_input_forced_down(&self, input: Input) -> bool {
+            self.held.borrow().contains(&input)
+        }
+        fn stop_breaking_block(&self) {}
+    }
+
+    #[test]
+    fn the_behavior_walks_a_straight_path_to_its_goal() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(|| {
+                let mut w = World::new();
+                w.floor(-2, 40);
+                let s = settings();
+                let player = Paper::new(&w, [0.5, 64.0, 0.5]);
+                let mut pb = PathingBehavior::new();
+                let goal = rc(GoalBlock([12, 64, 0]));
+                let mut arrived = false;
+                for tick in 0..400u64 {
+                    pb.begin_tick(&player, &s, &BareHands);
+                    let command = PathingCommand::SetGoalAndPath(goal.clone());
+                    pb.pre_tick(&player, &s, Some(&command), false, tick);
+                    pb.run_tick(&player, &s, &BareHands, tick);
+                    pb.post_tick(&player, &s, Some(&command), tick);
+                    player.physics();
+                    if player.player_feet() == [12, 64, 0] {
+                        arrived = true;
+                        break;
+                    }
+                }
+                assert!(arrived, "stopped at {:?}: {:?}", player.player_feet(), pb.log);
+                assert!(!pb.log.iter().any(|l| l.contains("keeps changing")), "{:?}", pb.log);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn the_behavior_goes_over_hills_and_down_again() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(|| {
+                let mut w = World::new();
+                w.floor(-2, 40);
+                let stone = w.stone.clone();
+                for x in 4..=7 {
+                    for z in -3..=3 {
+                        w.set(x, 64, z, &stone);
+                    }
+                }
+                for x in 6..=7 {
+                    for z in -3..=3 {
+                        w.set(x, 65, z, &stone);
+                    }
+                }
+                let s = settings();
+                let player = Paper::new(&w, [0.5, 64.0, 0.5]);
+                let mut pb = PathingBehavior::new();
+                let goal = rc(GoalBlock([14, 64, 0]));
+                let mut arrived = false;
+                for tick in 0..600u64 {
+                    pb.begin_tick(&player, &s, &BareHands);
+                    let command = PathingCommand::SetGoalAndPath(goal.clone());
+                    pb.pre_tick(&player, &s, Some(&command), false, tick);
+                    pb.run_tick(&player, &s, &BareHands, tick);
+                    pb.post_tick(&player, &s, Some(&command), tick);
+                    player.physics();
+                    if player.player_feet() == [14, 64, 0] {
+                        arrived = true;
+                        break;
+                    }
+                }
+                assert!(arrived, "stopped at {:?}: {:?}", player.player_feet(), pb.log.iter().rev().take(14).collect::<Vec<_>>());
+                assert!(!pb.log.iter().any(|l| l.contains("keeps changing")), "{:?}", pb.log);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn the_behavior_drops_down_a_ledge_and_cuts_the_corner() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(|| {
+                let mut w = World::new();
+                w.floor(-2, 40);
+                let stone = w.stone.clone();
+                // A plateau one block higher over x 0..=3; the goal is down and to the side.
+                for x in 0..=3 {
+                    for z in -3..=3 {
+                        w.set(x, 64, z, &stone);
+                    }
+                }
+                let s = settings();
+                let player = Paper::new(&w, [0.5, 65.0, 0.5]);
+                let mut pb = PathingBehavior::new();
+                let goal = rc(GoalBlock([8, 64, 3]));
+                let mut arrived = false;
+                for tick in 0..600u64 {
+                    pb.begin_tick(&player, &s, &BareHands);
+                    let command = PathingCommand::SetGoalAndPath(goal.clone());
+                    pb.pre_tick(&player, &s, Some(&command), false, tick);
+                    pb.run_tick(&player, &s, &BareHands, tick);
+                    pb.post_tick(&player, &s, Some(&command), tick);
+                    player.physics();
+                    if player.player_feet() == [8, 64, 3] {
+                        arrived = true;
+                        break;
+                    }
+                }
+                assert!(arrived, "stopped at {:?}: {:?}", player.player_feet(), pb.log.iter().rev().take(14).collect::<Vec<_>>());
+                assert!(!pb.log.iter().any(|l| l.contains("keeps changing")), "{:?}", pb.log);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+}

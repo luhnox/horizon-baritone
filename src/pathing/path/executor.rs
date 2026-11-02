@@ -18,6 +18,7 @@ use std::collections::HashSet;
 const MAX_MAX_DIST_FROM_PATH: f64 = 3.0;
 const MAX_DIST_FROM_PATH: f64 = 2.0;
 const MAX_TICKS_AWAY: i32 = 200;
+const MAX_RECURSION: u32 = 24;
 
 /// What the executor asks of the rest of the pathing behavior each tick.
 pub struct ExecEnv<'a> {
@@ -53,6 +54,7 @@ pub struct PathExecutor {
     sprint_next_tick: bool,
     /// Cut-off tracking for `closestPathPos` etc.
     pub log: Vec<String>,
+    depth: u32,
 }
 
 fn add(p: Pos, d: (i32, i32, i32)) -> Pos {
@@ -78,6 +80,7 @@ impl PathExecutor {
             to_walk_into: HashSet::new(),
             sprint_next_tick: false,
             log: Vec::new(),
+            depth: 0,
         }
     }
 
@@ -115,6 +118,20 @@ impl PathExecutor {
 
     /// One tick. True when the path is done, or the executor can be cut onto the next path.
     pub fn on_tick(&mut self, e: &ExecEnv) -> bool {
+        // The Java recurses here when the path position moves; a path whose positions disagree with the player
+        // would recurse for ever and take the stack with it, so past a few levels the path is given up.
+        if self.depth > MAX_RECURSION {
+            self.debug("The path position keeps changing, cancelling path");
+            self.cancel(e);
+            return true;
+        }
+        self.depth += 1;
+        let done = self.on_tick_inner(e);
+        self.depth -= 1;
+        done
+    }
+
+    fn on_tick_inner(&mut self, e: &ExecEnv) -> bool {
         let ctx = e.ctx;
         if self.path_position == self.path.length() - 1 {
             self.path_position += 1;

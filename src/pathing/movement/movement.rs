@@ -192,8 +192,9 @@ impl Movement {
             Kind::Traverse | Kind::Downward | Kind::Pillar => vec![src, dest],
             Kind::Ascend => {
                 let (dx, dz) = self.direction();
-                // Sometimes we back up to place the block, also sprint ascends, also skip descend to straight ascend.
-                let prior = above([src[0] - dx, src[1], src[2] - dz], 1);
+                // Sometimes we back up to place the block, also sprint ascends, also skip descend to straight ascend:
+                // src.subtract(direction).above(), the direction having its y of 1.
+                let prior = above([src[0] - dx, src[1] - 1, src[2] - dz], 1);
                 vec![src, above(src, 1), dest, prior, above(prior, 1)]
             }
             Kind::Descend => vec![src, above(dest, 1), dest],
