@@ -1,0 +1,280 @@
+// baritone.api.command.manager.CommandManager and registry.Registry: the commands, found by name,
+// and the lines of chat that list them. Every command is a function of the instance, the game and
+// its arguments; it either does its work or returns the sentence that says why not. The commands, their
+// names and aliases, their descriptions and what they say come from Baritone 1.21.4's
+// baritone.command.defaults.
+use super::baritone::Baritone;
+use super::baritone_argument::{Args, CommandError, CommandResult, Paginator};
+use super::baritone_cmd_build as build;
+use super::baritone_cmd_meta as meta;
+use super::baritone_cmd_nav as nav;
+use super::baritone_cmd_work as work;
+use super::baritone_goals::{rc, GoalBlock, GoalRef, GoalXZ, GoalYLevel};
+use super::baritone_gworld::{on_server, player_pos};
+use super::baritone_utils::{feet_of, Pos};
+use super::Game;
+use horizon_client::text::{self, ClickEvent, Style, Text};
+use std::collections::HashSet;
+
+/// The command a clickable chat line runs.
+pub const CLICK: &str = "@baritone";
+
+pub type Run = fn(&mut Baritone, &mut Game<'_>, &mut Args) -> CommandResult;
+
+pub struct Command {
+    pub names: &'static [&'static str],
+    pub short: &'static str,
+    pub long: &'static [&'static str],
+    /// A command that is only another one: what it runs (`set modified`).
+    pub alias: &'static str,
+    pub run: Run,
+}
+
+/// The run of an alias, which the manager never calls: it runs the target.
+pub fn alias_run(_b: &mut Baritone, _game: &mut Game<'_>, _args: &mut Args) -> CommandResult {
+    Ok(())
+}
+
+/// DefaultCommands.createAll's order.
+const ORDER: &[&str] = &[
+    "help", "set", "modified", "reset", "goal", "goto", "path", "proc", "eta", "version", "repack", "build",
+    "litematica", "come", "axis", "forcecancel", "gc", "invert", "tunnel", "render", "farm", "follow", "pickup",
+    "explorefilter", "reloadall", "saveall", "explore", "blacklist", "find", "mine", "click", "surface",
+    "thisway", "waypoints", "sethome", "home", "sel", "elytra", "pause", "resume", "paused", "cancel",
+];
+
+/// Every command, in registration order.
+pub fn registry() -> Vec<&'static Command> {
+    let mut all: Vec<&'static Command> = nav::COMMANDS
+        .iter()
+        .chain(work::COMMANDS.iter())
+        .chain(build::COMMANDS.iter())
+        .chain(meta::COMMANDS.iter())
+        .collect();
+    all.sort_by_key(|c| ORDER.iter().position(|n| *n == c.names[0]).unwrap_or(usize::MAX));
+    all
+}
+
+pub fn find(name: &str) -> Option<&'static Command> {
+    registry().into_iter().find(|c| c.names.iter().any(|n| n.eq_ignore_ascii_case(name)))
+}
+
+/// Run a line typed after the prefix (`goto 10 64 -20`).
+pub fn run(b: &mut Baritone, game: &mut Game<'_>, line: &str) {
+    let mut args = Args::parse(line);
+    let Some(name) = args.optional_string() else {
+        let _ = help(b, game, &mut Args::parse(""));
+        return;
+    };
+    let Some(command) = find(&name) else {
+        b.core.say_text(
+            game,
+            Text::colored(format!("Unknown command: {name}. "), text::RED).append(clickable("[#help]", text::YELLOW, run_event("help"), Text::colored("Click for the list of commands", text::GRAY))),
+        );
+        return;
+    };
+    if !command.alias.is_empty() {
+        let target = format!("{} {}", command.alias, args.rest_joined());
+        return run(b, game, target.trim());
+    }
+    let label = command.names[0];
+    if let Err(CommandError(why)) = (command.run)(b, game, &mut args) {
+        let _ = label;
+        b.core.say_red(game, &why);
+    }
+}
+
+/// A line of several colours that is all one link: the click and the hover sit on every piece, because
+/// the chat finds what is under the pointer by the piece's own style.
+pub fn linked(parts: Vec<(String, u32)>, click: ClickEvent, hover: Text) -> Text {
+    let mut out = Text::literal("");
+    for (label, color) in parts {
+        out = out.append(Text::styled(label, Style { click: Some(click.clone()), hover: Some(Box::new(hover.clone())), ..Style::color(color) }));
+    }
+    out
+}
+
+pub fn clickable(label: &str, color: u32, click: ClickEvent, hover: Text) -> Text {
+    Text::styled(label, Style { click: Some(click), hover: Some(Box::new(hover)), ..Style::color(color) })
+}
+
+/// A click that runs a Baritone command.
+pub fn run_event(command: &str) -> ClickEvent {
+    ClickEvent::RunCommand(format!("{CLICK} {command}"))
+}
+
+/// Print a page of `entries`, then empty lines to fill it, then the pager. `prefix` is the command a
+/// click on << or >> runs, without the page number.
+pub fn paginate(
+    b: &Baritone,
+    game: &mut Game<'_>,
+    args: &mut Args,
+    entries: Vec<Text>,
+    header: &str,
+    prefix: &str,
+) -> CommandResult {
+    let pag = Paginator::new(entries.len());
+    let page = pag.page_from(args)?;
+    b.core.say(game, header);
+    let (range, blank) = pag.range(page);
+    for e in &entries[range] {
+        b.core.say_text(game, e.clone());
+    }
+    for _ in 0..blank {
+        b.core.say_text(game, Text::colored("--", text::DARK_GRAY));
+    }
+    let link = |label: &str, to: usize, ok: bool, hover: &str| {
+        if ok {
+            clickable(label, text::GRAY, run_event(&format!("{prefix} {to}")), Text::colored(hover, text::GRAY))
+        } else {
+            Text::colored(label, text::DARK_GRAY)
+        }
+    };
+    let prev = link("<<", page.saturating_sub(1), pag.valid_page(page.saturating_sub(1)), "Click to view previous page");
+    let next = link(">>", page + 1, pag.valid_page(page + 1), "Click to view next page");
+    let pager = prev.append(Text::colored(" | ", text::GRAY)).append(next).append(Text::colored(format!(" {page}/{}", pag.max_page()), text::GRAY));
+    b.core.say_text(game, pager);
+    Ok(())
+}
+
+/// `help`, `help <page>`, `help <command>`.
+pub fn help(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
+    args.require_max(1)?;
+    if !args.has_any() || args.peek().is_some_and(|w| w.parse::<usize>().is_ok()) {
+        // Newest registration first, as Registry.descendingStream does.
+        let mut entries = Vec::new();
+        for c in registry().into_iter().rev() {
+            let hover = Text::colored(c.names.join("/"), text::WHITE)
+                .append(Text::colored(format!("\n{}", c.short), text::GRAY))
+                .append(Text::colored("\n\nClick to view full help", text::GRAY));
+            let click = run_event(&format!("help {}", c.names[0]));
+            entries.push(linked(vec![(c.names[0].to_owned(), text::GRAY), (format!(" - {}", c.short), text::DARK_GRAY)], click, hover));
+        }
+        return paginate(b, game, args, entries, "All Baritone commands (clickable):", "help");
+    }
+    let name = args.string("a command")?.to_ascii_lowercase();
+    let c = find(&name).ok_or_else(|| CommandError::new(format!("Command not found: {name}")))?;
+    let core = &b.core;
+    core.say(game, &format!("{} - {}", c.names.join(" / "), c.short));
+    core.say(game, "");
+    if c.alias.is_empty() {
+        for line in c.long {
+            core.say(game, line);
+        }
+    } else {
+        core.say(game, &format!("This command is an alias, for: {} ...", c.alias));
+    }
+    core.say(game, "");
+    core.say_text(game, clickable("Click to return to the help menu", text::AQUA, run_event("help"), Text::colored("#help", text::GRAY)));
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------
+// What the commands share.
+
+/// Where the player is.
+pub fn here(game: &Game<'_>) -> CommandResult<[f64; 3]> {
+    player_pos(game).ok_or_else(|| CommandError::new("Not in a world."))
+}
+
+/// The block the player's feet are in.
+pub fn feet(game: &Game<'_>) -> CommandResult<Pos> {
+    Ok(feet_of(here(game)?))
+}
+
+/// Cancel what is running before something new starts. Off on servers unless allowed.
+pub fn begin(b: &mut Baritone, game: &mut Game<'_>) -> CommandResult {
+    if on_server(game) && !b.core.settings.flag("allowOnServers") {
+        return Err(CommandError::new("Baritone is off on servers. #set allowOnServers true turns it on, if the server allows it."));
+    }
+    b.cancel_everything(game);
+    Ok(())
+}
+
+/// A block, and the deepslate form of an ore.
+pub fn with_variants(names: &[String]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for n in names {
+        out.insert(n.clone());
+        if let Some(ore) = n.strip_prefix("minecraft:").filter(|o| o.ends_with("_ore")) {
+            if !ore.starts_with("deepslate_") && !ore.starts_with("nether_") {
+                out.insert(format!("minecraft:deepslate_{ore}"));
+            }
+        }
+    }
+    out
+}
+
+/// One block name (ForBlockOptionalMeta): `stone`, `minecraft:stone`, or `oak_stairs[facing=north]`.
+pub fn block_word(b: &mut Baritone, game: &Game<'_>, word: &str) -> CommandResult<String> {
+    let bare = word.split('[').next().unwrap_or(word);
+    b.core.block_named(game, bare).ok_or_else(|| CommandError::new(format!("Expected a valid block, but got \"{word}\".")))
+}
+
+/// The rest of the arguments as block names. The set (with variants) and a label for chat.
+pub fn blocks(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult<(HashSet<String>, String)> {
+    let words = args.rest();
+    if words.is_empty() {
+        return Err(CommandError::new("Not enough arguments."));
+    }
+    let mut names = Vec::new();
+    for w in &words {
+        names.push(block_word(b, game, w)?);
+    }
+    while args.optional_string().is_some() {}
+    let label = format!(
+        "BlockOptionalMetaLookup{{[{}]}}",
+        names.iter().map(|n| format!("BlockOptionalMeta{{block=Block{{{n}}},properties={{}}}}")).collect::<Vec<_>>().join(", ")
+    );
+    Ok((with_variants(&names), label))
+}
+
+/// A coordinate the way Baritone's RelativeCoordinate reads one: a number, or `~` and `~5` from the
+/// block the player is in.
+pub fn relative(word: &str, origin: i32) -> Option<i32> {
+    if let Some(rest) = word.strip_prefix('~') {
+        let off = if rest.is_empty() { 0 } else { rest.parse::<i32>().ok()? };
+        return Some(origin + off);
+    }
+    word.parse::<i32>().ok()
+}
+
+pub fn looks_relative(word: &str) -> bool {
+    word.starts_with('~') || word.parse::<i32>().is_ok()
+}
+
+/// RelativeGoal: three coordinates are a block, two a column, one a height; none, where you stand.
+pub fn relative_goal(args: &mut Args, origin: Pos) -> CommandResult<GoalRef> {
+    let mut words = Vec::new();
+    while words.len() < 3 && args.peek().is_some_and(looks_relative) {
+        words.push(args.optional_string().unwrap_or_default());
+    }
+    let bad = |w: &str| CommandError::new(format!("Expected a valid coordinate, but got \"{w}\"."));
+    let n = |i: usize, o: i32, words: &[String]| relative(&words[i], o).ok_or_else(|| bad(&words[i]));
+    match words.len() {
+        0 => Ok(rc(GoalBlock(origin))),
+        1 => Ok(rc(GoalYLevel(n(0, origin[1], &words)?))),
+        2 => Ok(rc(GoalXZ(n(0, origin[0], &words)?, n(1, origin[2], &words)?))),
+        _ => Ok(rc(GoalBlock([n(0, origin[0], &words)?, n(1, origin[1], &words)?, n(2, origin[2], &words)?]))),
+    }
+}
+
+/// RelativeBlockPos: three coordinates.
+pub fn relative_pos(args: &mut Args, origin: Pos) -> CommandResult<Pos> {
+    let mut out = [0; 3];
+    for i in 0..3 {
+        let w = args.string("a coordinate")?;
+        out[i] = relative(&w, origin[i]).ok_or_else(|| CommandError::new(format!("Expected a valid coordinate, but got \"{w}\".")))?;
+    }
+    Ok(out)
+}
+
+/// Milliseconds since 1970.
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+/// The dimension the player is in, as a waypoint remembers it.
+pub fn dimension(game: &Game<'_>) -> String {
+    game.native_player().map_or("minecraft:overworld", |p| p.dimension).to_owned()
+}
