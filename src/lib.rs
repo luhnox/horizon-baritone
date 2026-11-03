@@ -17,6 +17,20 @@ pub mod baritone_world_scanner;
 pub mod baritone_builder_logic;
 #[path = "process/elytra/chunk.rs"]
 pub mod baritone_elytra_chunk;
+#[path = "process/elytra/noise.rs"]
+pub mod baritone_elytra_noise;
+#[path = "process/elytra/chunk_generator_hell.rs"]
+pub mod baritone_elytra_generator;
+#[path = "process/elytra/path_node.rs"]
+pub mod baritone_elytra_path_node;
+#[path = "process/elytra/raytracer.rs"]
+pub mod baritone_elytra_raytracer;
+#[path = "process/elytra/nether_pathfinder.rs"]
+pub mod baritone_elytra_pathfinder;
+#[path = "process/elytra/region.rs"]
+pub mod baritone_elytra_region;
+#[path = "process/elytra/path_finder.rs"]
+pub mod baritone_elytra_search;
 #[path = "cache/cached_world.rs"]
 pub mod baritone_cached_world;
 #[path = "api/settings.rs"]
@@ -82,3 +96,5 @@ pub mod baritone_pathing_behavior;
 mod tests;
 #[cfg(test)]
 mod tests_pathing;
+#[cfg(test)]
+mod tests_elytra;

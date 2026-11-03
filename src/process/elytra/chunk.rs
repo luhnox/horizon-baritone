@@ -3,7 +3,7 @@
 // cubes the elytra search is made of. The layout is the Java's (the native library's): 24 sections of 16x16x16
 // blocks (512 bytes each); a section is 8 x8 cubes of 64 bytes; an x8 is 8 x4 cubes of 8 bytes; an x4 is 8 x2
 // cubes of one byte; the 8 bits of that byte are the blocks.
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 pub const HEIGHT: i32 = 384;
 pub const SECTIONS: usize = (HEIGHT / 16) as usize;
@@ -102,22 +102,45 @@ impl Chunk {
         Self { sections: (0..SECTIONS).map(|_| None).collect(), filled: [0; SECTIONS], shared: false }
     }
 
-    /// A chunk with no blocks, not to be written to.
+    /// The one chunk with no blocks. Shared; writes to it panic.
     pub fn air() -> Arc<Chunk> {
-        let mut c = Chunk::new();
-        c.shared = true;
-        Arc::new(c)
+        static AIR: OnceLock<Arc<Chunk>> = OnceLock::new();
+        AIR.get_or_init(|| {
+            let mut c = Chunk::new();
+            c.shared = true;
+            Arc::new(c)
+        })
+        .clone()
     }
 
-    /// A chunk with every block solid, not to be written to.
+    /// The one chunk with every block solid. Shared; writes to it panic.
     pub fn solid() -> Arc<Chunk> {
-        let mut c = Chunk::new();
-        c.shared = true;
-        for i in 0..SECTIONS {
-            c.sections[i] = Some(Box::new([u64::MAX; SECTION_LONGS]));
-            c.filled[i] = 0xFF;
+        static SOLID: OnceLock<Arc<Chunk>> = OnceLock::new();
+        SOLID
+            .get_or_init(|| {
+                let mut c = Chunk::new();
+                c.shared = true;
+                for i in 0..SECTIONS {
+                    c.sections[i] = Some(Box::new([u64::MAX; SECTION_LONGS]));
+                    c.filled[i] = 0xFF;
+                }
+                Arc::new(c)
+            })
+            .clone()
+    }
+
+    /// The chunk's 12288 bytes in the native layout (little endian words), for hashing in tests.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = vec![0u8; SECTIONS * SECTION_LONGS * 8];
+        for (i, section) in self.sections.iter().enumerate() {
+            if let Some(s) = section {
+                for (j, v) in s.iter().enumerate() {
+                    let at = (i * SECTION_LONGS + j) * 8;
+                    out[at..at + 8].copy_from_slice(&v.to_le_bytes());
+                }
+            }
         }
-        Arc::new(c)
+        out
     }
 
     // The index math, the same as the native Chunk.h.
@@ -191,6 +214,18 @@ impl Chunk {
         }
     }
 
+    /// Sets every block of one 16x16x16 section (0..23) at once.
+    pub fn fill_section(&mut self, section: usize, solid: bool) {
+        assert!(!self.shared, "the shared air and solid chunks are read only");
+        if !solid {
+            self.filled[section] = 0;
+            self.sections[section] = None;
+            return;
+        }
+        self.filled[section] = 0xFF;
+        self.sections[section] = Some(Box::new([u64::MAX; SECTION_LONGS]));
+    }
+
     pub fn is_empty(&self, size: Size, x: i32, y: i32, z: i32) -> bool {
         match size {
             Size::X1 => !self.is_solid(x, y, z),
@@ -252,6 +287,77 @@ mod tests {
         c.set_block(5, 100, 9, false);
         assert!(c.is_empty(Size::X16, 5, 100, 9));
         assert!(!c.is_solid(5, 100, 9));
+    }
+
+    #[test]
+    fn every_block_of_a_section_reads_back() {
+        let mut c = Chunk::new();
+        let pattern = |x: i32, y: i32, z: i32| (x * 7 + y * 3 + z * 11) & 3 == 0;
+        for x in 0..16 {
+            for y in 48..64 {
+                for z in 0..16 {
+                    c.set_block(x, y, z, pattern(x, y, z));
+                }
+            }
+        }
+        for x in 0..16 {
+            for y in 48..64 {
+                for z in 0..16 {
+                    assert_eq!(pattern(x, y, z), c.is_solid(x, y, z));
+                }
+            }
+        }
+        c.set_block(3, 50, 4, false);
+        assert!(!c.is_solid(3, 50, 4));
+        // Untouched sections stay air and unallocated.
+        assert!(c.section(0).is_none());
+        assert!(!c.is_solid(0, 0, 0));
+    }
+
+    #[test]
+    fn a_clear_empties_its_cubes_only_with_the_last_block() {
+        let mut c = Chunk::new();
+        c.set_block(9, 70, 3, true);
+        assert!(!c.is_empty_x8(9, 70, 3));
+        assert!(c.is_empty_x8(1, 70, 3));
+        assert!(!c.is_empty_x4(9, 70, 3));
+        assert!(c.is_empty_x4(13, 70, 3));
+        assert!(!c.is_empty_x2(9, 70, 3));
+        assert!(c.is_empty_x2(11, 70, 3));
+        assert!(c.is_empty(Size::X16, 0, 80, 0));
+        c.set_block(10, 70, 3, true);
+        c.set_block(9, 70, 3, false);
+        assert!(!c.is_empty_x8(9, 70, 3));
+        assert!(!c.is_empty_x16(64));
+        c.set_block(10, 70, 3, false);
+        assert!(c.is_empty_x8(9, 70, 3));
+        assert!(c.is_empty_x16(64));
+        assert!(c.section(64).is_some()); // the section stays allocated
+    }
+
+    #[test]
+    fn filling_a_section() {
+        let mut c = Chunk::new();
+        c.fill_section(4, true);
+        assert!(c.is_solid(0, 64, 0));
+        assert!(c.is_solid(15, 79, 15));
+        assert!(!c.is_solid(0, 80, 0));
+        assert!(!c.is_empty_x8(15, 79, 15));
+        assert!(c.is_empty_x8(0, 80, 0));
+        c.fill_section(4, false);
+        assert!(c.is_empty_x16(64));
+        assert!(c.is_empty_x8(15, 79, 15));
+        c.fill_section(4, true);
+        c.set_block(15, 79, 15, false);
+        assert!(!c.is_empty_x8(15, 79, 15), "the x8 still has its other blocks");
+    }
+
+    #[test]
+    #[should_panic(expected = "read only")]
+    fn the_shared_air_chunk_refuses_writes() {
+        let mut c = Chunk::new();
+        c.shared = true;
+        c.set_block(0, 0, 0, true);
     }
 
     #[test]

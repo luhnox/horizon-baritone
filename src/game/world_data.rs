@@ -25,6 +25,12 @@ impl FileStore {
     }
 }
 
+impl super::baritone_elytra_region::RegionSource for FileStore {
+    fn read_region(&self, rx: i32, rz: i32) -> Option<Vec<u8>> {
+        RegionStore::load(self, rx, rz)
+    }
+}
+
 impl RegionStore for FileStore {
     fn load(&self, rx: i32, rz: i32) -> Option<Vec<u8>> {
         let compressed = std::fs::read(self.file(rx, rz)).ok()?;

@@ -63,6 +63,48 @@ name = "baritone_elytra_chunk"
 source = "src/process/elytra/chunk.rs"
 
 [[module]]
+id = "mod_elytra_noise"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_noise"
+source = "src/process/elytra/noise.rs"
+
+[[module]]
+id = "mod_elytra_generator"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_generator"
+source = "src/process/elytra/chunk_generator_hell.rs"
+
+[[module]]
+id = "mod_elytra_path_node"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_path_node"
+source = "src/process/elytra/path_node.rs"
+
+[[module]]
+id = "mod_elytra_raytracer"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_raytracer"
+source = "src/process/elytra/raytracer.rs"
+
+[[module]]
+id = "mod_elytra_pathfinder"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_pathfinder"
+source = "src/process/elytra/nether_pathfinder.rs"
+
+[[module]]
+id = "mod_elytra_region"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_region"
+source = "src/process/elytra/region.rs"
+
+[[module]]
+id = "mod_elytra_search"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_search"
+source = "src/process/elytra/path_finder.rs"
+
+[[module]]
 id = "mod_cached_world"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_cached_world"
