@@ -767,8 +767,12 @@ impl ElytraBehavior {
         self.deployed_firework_last_tick = true;
     }
 
+    /// `destroy`: the behaviour only stops. The pathfinder context is shared with the next behaviour (a landing is a new
+    /// behaviour on the same context), so a search is not cancelled here: a flag raised with no search running would stay up
+    /// and fail the next one. A search still running ends by itself and its answer is dropped. The context is cancelled and
+    /// destroyed by the process when it lets go of it.
     pub fn destroy(&mut self) {
-        self.npf.cancel();
+        self.running = None;
     }
 }
 

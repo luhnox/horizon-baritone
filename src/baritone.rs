@@ -35,7 +35,7 @@ use std::{
 };
 
 pub const ID: &str = "baritone";
-pub const VERSION: &str = "1.1.10";
+pub const VERSION: &str = "1.1.11";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
