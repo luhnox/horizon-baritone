@@ -9,7 +9,7 @@ This port is **not complete**. This file lists the classes of Baritone 1.21.4 (`
 | missing | not written |
 | n/a | Java or Minecraft machinery with no meaning in Rust on Horizon (mixin accessors, the event bus, toasts) |
 
-Rows below: 297 (classes that go together share a row). ported 99, partial 94, missing 65, n/a 39.
+Rows below: 297 (classes that go together share a row). ported 119, partial 89, missing 50, n/a 39.
 
 The settings are 243 of 252 (generated from Settings.java). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`; the processes and the path executor are the largest gap, and the Nether elytra pathfinder (22 files) is not started.
 
@@ -35,8 +35,8 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 
 | Java | Status | Rust or note |
 |---|---|---|
-| IAimProcessor | missing | smooth aim with prediction is not ported |
-| ITickableAimProcessor | missing | smooth aim with prediction is not ported |
+| IAimProcessor | ported | AimProcessor in src/behavior/aim.rs (LookBehavior in its CLIENT mode: the camera turns) |
+| ITickableAimProcessor | ported | AimProcessor in src/behavior/aim.rs (LookBehavior in its CLIENT mode: the camera turns) |
 
 ## api/cache
 
@@ -49,7 +49,7 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | IWaypointCollection | ported | src/cache/waypoints.rs |
 | IWorldData | missing |  |
 | IWorldProvider | missing |  |
-| IWorldScanner | partial | src/game/world.rs (WorldCache): loaded chunks only |
+| IWorldScanner | ported | src/game/scanner.rs |
 | Waypoint | ported | src/cache/waypoints.rs |
 
 ## api/command
@@ -262,16 +262,16 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 
 | Java | Status | Rust or note |
 |---|---|---|
-| CacheFiles | missing |  |
-| CachedChunk | missing |  |
-| CachedRegion | missing |  |
-| CachedWorld | missing |  |
-| ChunkPacker | missing |  |
-| FasterWorldScanner | partial | src/game/world.rs |
+| CacheFiles | ported | FileStore in src/game/world_data.rs |
+| CachedChunk | ported | src/cache/cached_world.rs |
+| CachedRegion | ported | src/cache/cached_world.rs, the .bcr format |
+| CachedWorld | partial | src/cache/cached_world.rs: no packer thread, a few chunks a tick |
+| ChunkPacker | partial | src/game/world_data.rs: the flow of border water is guessed |
+| FasterWorldScanner | ported | src/game/scanner.rs: same chunk spiral and section order |
 | WaypointCollection | ported | src/cache/waypoints.rs |
-| WorldData | missing |  |
-| WorldProvider | missing |  |
-| WorldScanner | partial | src/game/world.rs |
+| WorldData | ported | src/game/world_data.rs |
+| WorldProvider | ported | src/game/world_data.rs |
+| WorldScanner | ported | src/game/scanner.rs and src/cache/world_scanner.rs |
 
 ## main/command
 
@@ -377,7 +377,7 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | CutoffPath | ported | src/pathing/calc/path.rs (cut_off) |
 | PathExecutor | ported | src/pathing/path/executor.rs |
 | SplicedPath | ported | src/pathing/calc/path.rs (try_splice) |
-| SprintJump | missing |  |
+| SprintJump | ported | src/pathing/path/sprint_jump.rs |
 
 ## main/pathing/precompute
 
@@ -390,16 +390,16 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 
 | Java | Status | Rust or note |
 |---|---|---|
-| BackfillProcess | missing |  |
-| BuilderProcess | partial | src/process/build.rs |
-| CustomGoalProcess | ported | src/process/goal.rs |
-| ElytraProcess | partial | src/process/elytra.rs: straight flight |
-| ExploreProcess | partial | src/process/explore.rs |
-| FarmProcess | partial | src/process/farm.rs |
-| FollowProcess | partial | src/process/follow.rs |
-| GetToBlockProcess | partial | src/process/getto.rs |
-| InventoryPauserProcess | missing |  |
-| MineProcess | ported | src/process/mine.rs: quantity from a drop table |
+| BackfillProcess | ported | src/process/backfill.rs |
+| BuilderProcess | partial | src/process/build.rs and builder_logic.rs: written from the Java; the inventory moves of allowInventory, MapArt and selection schematics, buildRepeat and the substitutes are not |
+| CustomGoalProcess | ported | src/process/goal.rs: disconnectOnArrival and the elytra hand-over are not |
+| ElytraProcess | partial | src/process/elytra.rs: straight flight, not the Java |
+| ExploreProcess | ported | src/process/explore.rs over the cached world |
+| FarmProcess | ported | src/process/farm.rs: bone meal targets are crops and cocoa |
+| FollowProcess | ported | src/process/follow.rs |
+| GetToBlockProcess | ported | src/process/getto.rs |
+| InventoryPauserProcess | ported | src/process/backfill.rs |
+| MineProcess | ported | src/process/mine.rs |
 
 ## main/process/elytra
 
@@ -454,7 +454,7 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | IRenderer | partial | src/game/render.rs |
 | InputOverrideHandler | ported | src/behavior/input.rs |
 | PathRenderer | partial | src/game/render.rs |
-| PathingCommandContext | missing |  |
+| PathingCommandContext | ported | Core::path_hooks and CostHooks |
 | PathingControlManager | ported | Baritone::control_tick and pathing_behavior.rs (pre_tick, post_tick) |
 | PlayerMovementInput | n/a | the game reads keys |
 | ToolSet | ported | GameCtx::str_vs_block, game/player_context.rs |
@@ -477,8 +477,8 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 
 | Java | Status | Rust or note |
 |---|---|---|
-| Avoidance | missing |  |
-| BetterWorldBorder | missing |  |
+| Avoidance | ported | src/pathing/avoidance.rs: spiders, angry piglins and endermen are not told apart |
+| BetterWorldBorder | ported | GameCtx::entirely_contains and can_place_at |
 | Favoring | partial | a map of factors in the search; the previous-path part is not built yet, Avoidance is missing |
 | MutableMoveResult | ported | src/pathing/movement/calculation_context.rs |
 | PathBase | missing |  |
