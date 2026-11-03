@@ -35,7 +35,7 @@ use std::{
 };
 
 pub const ID: &str = "baritone";
-pub const VERSION: &str = "1.1.5";
+pub const VERSION: &str = "1.1.7";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -442,6 +442,9 @@ impl Baritone {
     fn control_tick(&mut self, game: &mut Game<'_>) {
         let Baritone { core, procs, in_control, last_command } = self;
         let last_tick = *in_control;
+        for p in procs.ordered() {
+            p.refresh(core, game);
+        }
         let calc_failed = core.pathing.calc_failed_last_tick();
         let safe = core.pathing_safe_to_cancel();
         let mut command: Option<PathingCommand> = None;

@@ -65,7 +65,7 @@ impl<'a, 'g> GameCtx<'a, 'g> {
     }
 
     /// RotationUtils.reachableOffset.
-    fn reachable_offset(&self, pos: Pos, offset: [f64; 3], reach: f64, would_sneak: bool) -> Option<Rotation> {
+    fn reachable_offset_impl(&self, pos: Pos, offset: [f64; 3], reach: f64, would_sneak: bool) -> Option<Rotation> {
         let eyes = if would_sneak { self.infer_sneaking_eye_position() } else { self.player_head() };
         let rotation = calc_rotation_from_vec3d(eyes, offset, self.player_rotations());
         let actual = self.peek_rotation(rotation);
@@ -269,6 +269,19 @@ impl PlayerContext for GameCtx<'_, '_> {
 
     fn block_reach_distance(&self) -> f64 {
         self.player(|g| g.bar_reach())
+    }
+
+    fn reachable_offset(&self, pos: Pos, offset: [f64; 3], reach: f64, would_sneak: bool) -> Option<Rotation> {
+        self.reachable_offset_impl(pos, offset, reach, would_sneak)
+    }
+
+    fn select_item(&self, select: bool, wanted: &dyn Fn(&str) -> bool) -> bool {
+        let mut g = self.game.borrow_mut();
+        let Some(slot) = super::baritone_gworld::hotbar_slot(&g, |n| wanted(n)) else { return false };
+        if select {
+            inv::select(&mut g, slot);
+        }
+        true
     }
 
     fn reachable(&self, pos: Pos, reach: f64, would_sneak: bool) -> Option<Rotation> {

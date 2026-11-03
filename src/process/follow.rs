@@ -28,11 +28,13 @@ pub struct FollowProcess {
     /// Where what it follows is now, for #proc and for drawing.
     cache: Vec<[f64; 3]>,
     into: bool,
+    /// `isActive`: a filter is set and something is there to follow.
+    live: bool,
 }
 
 impl FollowProcess {
     pub fn new() -> Self {
-        Self { filter: None, cache: Vec::new(), into: false }
+        Self { filter: None, cache: Vec::new(), into: false, live: false }
     }
 
     pub fn follow(&mut self, filter: Filter) {
@@ -93,8 +95,15 @@ impl Process for FollowProcess {
     }
 
     fn is_active(&self) -> bool {
-        // Active while there is something to follow; the scan happens in on_tick.
-        self.filter.is_some()
+        self.live
+    }
+
+    fn refresh(&mut self, core: &mut Core, game: &mut Game<'_>) {
+        // isActive scans the world: with nothing to follow the process is not in control, but the filter stays.
+        if self.filter.is_some() {
+            self.scan(core, game);
+        }
+        self.live = self.filter.is_some() && !self.cache.is_empty();
     }
 
     fn priority(&self) -> f64 {
@@ -102,14 +111,10 @@ impl Process for FollowProcess {
     }
 
     fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, _calc_failed: bool, _safe: bool) -> PathingCommand {
-        self.scan(core, game);
         if self.cache.is_empty() {
-            // Nothing left to follow: the process is over, as Baritone's is.
-            self.filter = None;
-            core.say(game, "Nothing to follow any more.");
             return PathingCommand::Defer;
         }
-        let radius = core.settings.int("followRadius").max(1);
+        let radius = core.settings.int("followRadius");
         let offset = core.settings.int("followOffsetDistance");
         let goals: Vec<GoalRef> = self
             .cache
@@ -117,8 +122,8 @@ impl Process for FollowProcess {
             .map(|p| {
                 let mut at = *p;
                 if offset != 0 && !self.into {
-                    let r = f64::from(core.settings.float("followOffsetDirection") as f32).to_radians();
-                    at = [p[0] - r.sin() * f64::from(offset), p[1], p[2] + r.cos() * f64::from(offset)];
+                    let g = super::baritone_goals::GoalXZ::from_direction(*p, core.settings.float("followOffsetDirection") as f32, f64::from(offset));
+                    at = [f64::from(g.0), p[1], f64::from(g.1)];
                 }
                 if self.into { rc(GoalBlock(feet_of(at))) } else { rc(GoalNear(feet_of(at), radius)) }
             })
@@ -129,10 +134,12 @@ impl Process for FollowProcess {
     fn on_lost_control(&mut self, _core: &mut Core, _game: &mut Game<'_>) {
         self.filter = None;
         self.cache.clear();
+        self.live = false;
     }
 
     fn cancel(&mut self) {
         self.filter = None;
         self.cache.clear();
+        self.live = false;
     }
 }

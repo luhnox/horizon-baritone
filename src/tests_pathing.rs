@@ -398,6 +398,12 @@ mod paper {
         fn reachable(&self, _pos: Pos, _reach: f64, _would_sneak: bool) -> Option<Rotation> {
             None
         }
+        fn reachable_offset(&self, _pos: Pos, _offset: [f64; 3], _reach: f64, _would_sneak: bool) -> Option<Rotation> {
+            None
+        }
+        fn select_item(&self, _select: bool, _wanted: &dyn Fn(&str) -> bool) -> bool {
+            false
+        }
         fn ray_trace_towards(&self, _rotation: Rotation, _reach: f64, _would_sneak: bool) -> Option<(Pos, [i32; 3])> {
             None
         }

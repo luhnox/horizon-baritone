@@ -1,89 +1,56 @@
-// baritone.process.FarmProcess: harvest the crops that are ripe, plant the seeds again on the empty
-// farmland, and pick up what fell. Wheat, carrots, potatoes, beetroots, nether wart and cocoa are
-// ripe at their last growth stage; melons and pumpkins always; sugar cane and cactus above the base.
+// baritone.process.FarmProcess, written from the Java: scan the chunks round the player for crops, farmland and
+// the like; break the ripe ones in reach, plant seeds on bare farmland, soul sand and jungle logs, use bone meal,
+// and otherwise path to the nearest work (GoalBreak for a ripe crop, a block above bare farmland, the dropped
+// seeds and crops).
 use super::baritone::Core;
-use super::baritone_goals::{rc, Goal, GoalGetToBlock, GoalNear, GoalRef};
-use super::baritone_gworld::{block_name, block_state_text, dropped_items, is_air_at};
-use super::baritone_inventory as inv;
+use super::baritone_goals::{rc, GoalBlock, GoalBreak, GoalComposite, GoalGetToBlock, GoalRef};
+use super::baritone_movement_state::Input;
 use super::baritone_pathing::{PathingCommand, Process};
-use super::baritone_utils::{dist_sq, up, Pos};
+use super::baritone_player_context::PlayerContext;
+use super::baritone_scanner::scan_chunk_radius;
+use super::baritone_utils::{dist_sq, Pos};
 use super::Game;
 use std::collections::HashSet;
 
-/// (crop block, growth stage that is ripe, seed item that replants it, block the seed goes on)
-const CROPS: &[(&str, i32, &str, &str)] = &[
-    ("minecraft:wheat", 7, "minecraft:wheat_seeds", "minecraft:farmland"),
-    ("minecraft:carrots", 7, "minecraft:carrot", "minecraft:farmland"),
-    ("minecraft:potatoes", 7, "minecraft:potato", "minecraft:farmland"),
-    ("minecraft:beetroots", 3, "minecraft:beetroot_seeds", "minecraft:farmland"),
-    ("minecraft:nether_wart", 3, "minecraft:nether_wart", "minecraft:soul_sand"),
+const FARMLAND_PLANTABLE: &[&str] = &["beetroot_seeds", "melon_seeds", "wheat_seeds", "pumpkin_seeds", "potato", "carrot"];
+
+const PICKUP_DROPPED: &[&str] = &[
+    "beetroot_seeds", "beetroot", "melon_seeds", "melon_slice", "melon", "wheat_seeds", "wheat", "pumpkin_seeds", "pumpkin", "potato", "carrot",
+    "nether_wart", "cocoa_beans", "sugar_cane", "bamboo", "cactus",
 ];
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Job {
-    Harvest(Pos),
-    /// Plant on the farmland (or soul sand) block at this position, the item in this hotbar slot.
-    Plant(Pos, usize),
-}
+/// The blocks of `Harvest`, in its order.
+const HARVEST: &[&str] = &["wheat", "carrots", "potatoes", "beetroots", "pumpkin", "melon", "nether_wart", "cocoa", "sugar_cane", "bamboo", "cactus"];
+
+const HORIZONTALS: [[i32; 3]; 4] = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0]];
 
 pub struct FarmProcess {
     active: bool,
-    center: Pos,
+    locations: Option<Vec<Pos>>,
+    tick_count: i32,
     range: i32,
-    job: Option<Job>,
-    next_scan: u64,
-    loiter_until: u64,
-    last_break: Option<Pos>,
-    harvested: u32,
-    planted: u32,
-    jobs: Vec<Job>,
-    told_idle: bool,
-    tries: u32,
+    center: Pos,
+}
+
+fn bare(name: &str) -> &str {
+    name.strip_prefix("minecraft:").unwrap_or(name)
 }
 
 impl FarmProcess {
     pub fn new() -> Self {
-        Self {
-            active: false,
-            center: [0, 0, 0],
-            range: 40,
-            job: None,
-            next_scan: 0,
-            loiter_until: 0,
-            last_break: None,
-            harvested: 0,
-            planted: 0,
-            jobs: Vec::new(),
-            told_idle: false,
-            tries: 0,
-        }
+        Self { active: false, locations: None, tick_count: 0, range: 0, center: [0, 0, 0] }
     }
 
-    /// Farm within `range` blocks of `center`; a range of 0 is as far as the world is scanned.
-    pub fn farm(&mut self, center: Pos, range: i32) {
-        *self = Self::new();
-        self.center = center;
-        self.range = if range <= 0 { 256 } else { range.clamp(4, 256) };
+    /// `farm(range, pos)`.
+    pub fn farm(&mut self, range: i32, pos: Pos) {
+        self.center = pos;
+        self.range = range;
         self.active = true;
+        self.locations = None;
     }
-}
 
-/// The growth stage in a state text (`age=7`), if it has one.
-fn age_of(state: &str) -> Option<i32> {
-    let at = state.find("age=")? + 4;
-    state[at..].split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
-}
-
-/// Whether the crop block at `pos` is ready to harvest.
-fn ripe(game: &Game<'_>, pos: Pos, name: &str) -> bool {
-    match name {
-        "minecraft:pumpkin" | "minecraft:melon" => true,
-        "minecraft:sugar_cane" | "minecraft:cactus" => block_name(game, up(pos, -1)) == name,
-        "minecraft:cocoa" => age_of(&block_state_text(game, pos)) == Some(2),
-        _ => CROPS
-            .iter()
-            .find(|c| c.0 == name)
-            .is_some_and(|c| age_of(&block_state_text(game, pos)).is_some_and(|a| a >= c.1)),
+    fn state_age(state: &super::baritone_block_state::BlockState) -> i32 {
+        state.prop("age").and_then(|a| a.parse().ok()).unwrap_or(0)
     }
 }
 
@@ -93,7 +60,7 @@ impl Process for FarmProcess {
     }
 
     fn display(&self) -> String {
-        format!("Farming: harvested {}, planted {}", self.harvested, self.planted)
+        "Farming".to_owned()
     }
 
     fn is_active(&self) -> bool {
@@ -101,139 +68,269 @@ impl Process for FarmProcess {
     }
 
     fn priority(&self) -> f64 {
-        2.5
+        2.0
     }
 
-    fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, _calc_failed: bool, _safe: bool) -> PathingCommand {
-        let tick = game.ticks;
-        let Some(feet) = core.player_feet(game) else {
-            return PathingCommand::Defer;
-        };
-        let broken = std::mem::take(&mut core.dig.broken);
-        for (pos, _) in broken {
-            self.harvested += 1;
-            self.last_break = Some(pos);
-            self.loiter_until = tick + 15;
-        }
-        // Pick up what fell.
-        if tick < self.loiter_until {
-            if let Some(near) = self.last_break {
-                let item = dropped_items(game)
-                    .into_iter()
-                    .map(|(p, _)| [p[0].floor() as i32, p[1].floor() as i32, p[2].floor() as i32])
-                    .filter(|p| dist_sq(*p, near) <= 49 && *p != feet)
-                    .min_by_key(|p| dist_sq(*p, feet));
-                if let Some(item) = item {
-                    return PathingCommand::SetGoalAndPath(rc(GoalNear(item, 0)));
+    fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, calc_failed: bool, is_safe_to_cancel: bool) -> PathingCommand {
+        let interval = core.settings.int("mineGoalUpdateInterval") as i32;
+        if interval != 0 {
+            let due = self.tick_count % interval == 0;
+            self.tick_count += 1;
+            if due {
+                let mut scan: Vec<String> = HARVEST.iter().map(|b| format!("minecraft:{b}")).collect();
+                if core.settings.flag("replantCrops") {
+                    scan.push("minecraft:farmland".into());
+                    scan.push("minecraft:jungle_log".into());
+                    if core.settings.flag("replantNetherWart") {
+                        scan.push("minecraft:soul_sand".into());
+                    }
                 }
+                let names: HashSet<String> = scan.into_iter().collect();
+                let ids = core.cache.state_ids(game, &names);
+                let feet = core.player_feet(game).unwrap_or([0, 0, 0]);
+                self.locations = Some(scan_chunk_radius(game, &ids, feet, core.settings.int("farmMaxScanSize").max(0) as usize, 10));
             }
         }
-        if tick >= self.next_scan {
-            self.next_scan = tick + 20;
-            self.jobs = self.scan(core, game);
-            self.job = self.jobs.first().copied();
-            self.tries = 0;
-        }
-        // A job that is done (the crop is gone, the seed is in) goes.
-        if let Some(job) = self.job {
-            let gone = match job {
-                Job::Harvest(p) => is_air_at(game, p),
-                Job::Plant(base, _) => !is_air_at(game, up(base, 1)),
-            };
-            if gone {
-                if matches!(job, Job::Plant(..)) {
-                    self.planted += 1;
-                }
-                self.jobs.retain(|j| *j != job);
-                self.job = self.jobs.first().copied();
-                self.tries = 0;
-            }
-        }
-        let Some(job) = self.job else {
-            if !self.told_idle {
-                self.told_idle = true;
-                core.say(game, "Nothing ripe to harvest and nothing to plant: waiting for the crops to grow.");
-            }
-            return PathingCommand::Defer;
-        };
-        self.told_idle = false;
+        let Some(locations) = self.locations.clone() else { return PathingCommand::RequestPause };
 
-        match job {
-            Job::Harvest(p) => {
-                if GoalGetToBlock(p).is_in_goal(feet) && core.dig.active.is_none() && !core.user_paused {
-                    self.tries += 1;
-                    if self.tries > 6 || !core.start_dig(game, p) {
-                        self.jobs.retain(|j| *j != job);
-                        self.job = self.jobs.first().copied();
-                    }
+        let mut to_break: Vec<Pos> = Vec::new();
+        let mut open_farmland: Vec<Pos> = Vec::new();
+        let mut bonemealable: Vec<Pos> = Vec::new();
+        let mut open_soulsand: Vec<Pos> = Vec::new();
+        let mut open_log: Vec<Pos> = Vec::new();
+        let mut has_immature_crop = false;
+        let (range, center) = (self.range, self.center);
+        core.drive(game, |_, ctx, s| {
+            let air = |p: Pos| ctx.bsi().get0(p[0], p[1], p[2]).is_air();
+            for pos in &locations {
+                // Check if the target block is out of range.
+                if range != 0 && dist_sq(*pos, center) > i64::from(range) * i64::from(range) {
+                    continue;
                 }
-                PathingCommand::RevalidateGoalAndPath(rc(GoalGetToBlock(p)))
+                let state = ctx.bsi().get0(pos[0], pos[1], pos[2]);
+                let air_above = air([pos[0], pos[1] + 1, pos[2]]);
+                let name = bare(&state.name).to_owned();
+                if name == "farmland" {
+                    if air_above {
+                        open_farmland.push(*pos);
+                    }
+                    continue;
+                }
+                if name == "soul_sand" {
+                    if air_above {
+                        open_soulsand.push(*pos);
+                    }
+                    continue;
+                }
+                if name == "jungle_log" {
+                    if HORIZONTALS.iter().any(|d| air([pos[0] + d[0], pos[1], pos[2] + d[2]])) {
+                        open_log.push(*pos);
+                    }
+                    continue;
+                }
+                let _ = s;
+                if HARVEST.contains(&name.as_str()) && Self::ready_for_harvest_in(&name, &state, ctx, *pos, &core_flags(s)) {
+                    to_break.push(*pos);
+                    continue;
+                }
+                if HARVEST.contains(&name.as_str()) {
+                    has_immature_crop = true;
+                }
+                // BonemealableBlock: a crop that is not ripe, a cocoa pod that is not full grown.
+                let valid_target = match name.as_str() {
+                    "wheat" | "carrots" | "potatoes" => Self::state_age(&state) < 7,
+                    "beetroots" => Self::state_age(&state) < 3,
+                    "cocoa" => Self::state_age(&state) < 2,
+                    _ => false,
+                };
+                if valid_target {
+                    bonemealable.push(*pos);
+                }
             }
-            Job::Plant(base, slot) => {
-                // Stand within reach of the soil's top face.
-                let above = up(base, 1);
-                let close = dist_sq(feet, above) <= 9;
-                if close {
-                    inv::select(game, slot);
-                    self.tries += 1;
-                    if core.click_block(game, base, [0, 1, 0]) {
-                        self.next_scan = tick + 3;
-                    }
-                    if self.tries > 30 {
-                        self.jobs.retain(|j| *j != job);
-                        self.job = self.jobs.first().copied();
-                        self.tries = 0;
-                    }
+        });
+
+        core.input.clear_all_keys();
+        let feet = core.player_feet(game).unwrap_or([0, 0, 0]);
+        let reach = core.drive(game, |_, ctx, _| ctx.block_reach_distance());
+        let in_reach = |pos: Pos| (dist_sq(feet, pos) as f64) <= reach * reach;
+
+        for pos in &to_break {
+            if !in_reach(*pos) {
+                continue;
+            }
+            let rot = core.drive(game, |_, ctx, _| ctx.reachable(*pos, ctx.block_reach_distance(), false));
+            if let (Some(rot), true) = (rot, is_safe_to_cancel) {
+                let mut looking = false;
+                core.drive(game, |_, ctx, _| {
+                    ctx.update_look_target(rot, true);
+                    ctx.switch_to_best_tool_for(*pos);
+                    looking = ctx.is_looking_at(*pos);
+                });
+                if looking {
+                    core.input.set_input_force_state(Input::ClickLeft, true);
                 }
-                let goal: GoalRef = rc(GoalNear(above, 2));
-                PathingCommand::RevalidateGoalAndPath(goal)
+                return PathingCommand::RequestPause;
             }
         }
+        let mut both = open_farmland.clone();
+        both.extend(open_soulsand.iter().copied());
+        for pos in &both {
+            if !in_reach(*pos) {
+                continue;
+            }
+            let soulsand = open_soulsand.contains(pos);
+            let mut click: Option<bool> = None;
+            core.drive(game, |_, ctx, _| {
+                let offset = [f64::from(pos[0]) + 0.5, f64::from(pos[1]) + 1.0, f64::from(pos[2]) + 0.5];
+                let Some(rot) = ctx.reachable_offset(*pos, offset, reach, false) else { return };
+                if !is_safe_to_cancel || !ctx.select_item(true, &|item| if soulsand { bare(item) == "nether_wart" } else { FARMLAND_PLANTABLE.contains(&bare(item)) }) {
+                    return;
+                }
+                if matches!(ctx.ray_trace_towards(rot, reach, false), Some((_, [0, 1, 0]))) {
+                    ctx.update_look_target(rot, true);
+                    click = Some(ctx.is_looking_at(*pos));
+                }
+            });
+            if let Some(looking) = click {
+                if looking {
+                    core.input.set_input_force_state(Input::ClickRight, true);
+                }
+                return PathingCommand::RequestPause;
+            }
+        }
+        for pos in &open_log {
+            if !in_reach(*pos) {
+                continue;
+            }
+            for dir in HORIZONTALS {
+                let side = [pos[0] + dir[0], pos[1], pos[2] + dir[2]];
+                let is_air = core.with_calc(game, |calc, _, _| calc.bsi.get0(side[0], side[1], side[2]).is_air());
+                if !is_air {
+                    continue;
+                }
+                let mut click: Option<bool> = None;
+                core.drive(game, |_, ctx, _| {
+                    // Vec3.atCenterOf(pos).add(dir * 0.5)
+                    let face_center = [f64::from(pos[0]) + 0.5 + f64::from(dir[0]) * 0.5, f64::from(pos[1]) + 0.5, f64::from(pos[2]) + 0.5 + f64::from(dir[2]) * 0.5];
+                    let Some(rot) = ctx.reachable_offset(*pos, face_center, reach, false) else { return };
+                    if !is_safe_to_cancel || !ctx.select_item(true, &|item| bare(item) == "cocoa_beans") {
+                        return;
+                    }
+                    if ctx.ray_trace_towards(rot, reach, false).is_some_and(|(_, face)| face == dir) {
+                        ctx.update_look_target(rot, true);
+                        click = Some(ctx.is_looking_at(*pos));
+                    }
+                });
+                if let Some(looking) = click {
+                    if looking {
+                        core.input.set_input_force_state(Input::ClickRight, true);
+                    }
+                    return PathingCommand::RequestPause;
+                }
+            }
+        }
+        for pos in &bonemealable {
+            if !in_reach(*pos) {
+                continue;
+            }
+            let mut click: Option<bool> = None;
+            core.drive(game, |_, ctx, _| {
+                let Some(rot) = ctx.reachable(*pos, ctx.block_reach_distance(), false) else { return };
+                if is_safe_to_cancel && ctx.select_item(true, &|item| bare(item) == "bone_meal") {
+                    ctx.update_look_target(rot, true);
+                    click = Some(ctx.is_looking_at(*pos));
+                }
+            });
+            if let Some(looking) = click {
+                if looking {
+                    core.input.set_input_force_state(Input::ClickRight, true);
+                }
+                return PathingCommand::RequestPause;
+            }
+        }
+
+        if calc_failed {
+            core.say(game, "Farm failed");
+            self.active = false;
+            return PathingCommand::RequestPause;
+        }
+
+        let have = |core: &mut Core, game: &mut Game<'_>, wanted: &dyn Fn(&str) -> bool| core.drive(game, |_, ctx, _| ctx.select_item(false, wanted));
+        let mut goalz: Vec<GoalRef> = Vec::new();
+        for pos in &to_break {
+            goalz.push(rc(GoalBreak(*pos)));
+        }
+        if have(core, game, &|item| FARMLAND_PLANTABLE.contains(&bare(item))) {
+            for pos in &open_farmland {
+                goalz.push(rc(GoalBlock([pos[0], pos[1] + 1, pos[2]])));
+            }
+        }
+        if have(core, game, &|item| bare(item) == "nether_wart") {
+            for pos in &open_soulsand {
+                goalz.push(rc(GoalBlock([pos[0], pos[1] + 1, pos[2]])));
+            }
+        }
+        if have(core, game, &|item| bare(item) == "cocoa_beans") {
+            for pos in &open_log {
+                for dir in HORIZONTALS {
+                    let side = [pos[0] + dir[0], pos[1], pos[2] + dir[2]];
+                    if core.with_calc(game, |calc, _, _| calc.bsi.get0(side[0], side[1], side[2]).is_air()) {
+                        goalz.push(rc(GoalGetToBlock(side)));
+                    }
+                }
+            }
+        }
+        if have(core, game, &|item| bare(item) == "bone_meal") {
+            for pos in &bonemealable {
+                goalz.push(rc(GoalBlock(*pos)));
+            }
+        }
+        for item in game.dropped.iter() {
+            if item.on_ground && PICKUP_DROPPED.contains(&bare(&item.stack.item)) {
+                // +0.1 because of farmland's 0.9375 dummy height lol
+                goalz.push(rc(GoalBlock([item.position.x.floor() as i32, (item.position.y + 0.1).floor() as i32, item.position.z.floor() as i32])));
+            }
+        }
+        if goalz.is_empty() {
+            if has_immature_crop && core.settings.flag("farmWaitForGrowth") {
+                return PathingCommand::RequestPause;
+            }
+            core.say(game, "Farm failed");
+            self.active = false;
+            return PathingCommand::RequestPause;
+        }
+        PathingCommand::SetGoalAndPath(rc(GoalComposite(goalz)))
     }
 
-    fn on_lost_control(&mut self, _core: &mut Core, _game: &mut Game<'_>) {}
+    fn on_lost_control(&mut self, _core: &mut Core, _game: &mut Game<'_>) {
+        self.active = false;
+    }
 
     fn cancel(&mut self) {
         self.active = false;
     }
 }
 
+/// What `readyForHarvest` reads of the settings.
+struct Flags {
+    replant_crops: bool,
+}
+
+fn core_flags(s: &super::baritone_settings::Settings) -> Flags {
+    Flags { replant_crops: s.flag("replantCrops") }
+}
+
 impl FarmProcess {
-    /// The jobs around the centre, nearest first: ripe crops, then empty soil to plant.
-    fn scan(&self, core: &mut Core, game: &Game<'_>) -> Vec<Job> {
-        let feet = core.player_feet(game).unwrap_or(self.center);
-        let mut names: HashSet<String> = CROPS.iter().map(|c| c.0.to_owned()).collect();
-        for extra in ["minecraft:pumpkin", "minecraft:melon", "minecraft:sugar_cane", "minecraft:cactus", "minecraft:cocoa"] {
-            names.insert(extra.to_owned());
+    fn ready_for_harvest_in(name: &str, state: &super::baritone_block_state::BlockState, ctx: &dyn PlayerContext, pos: Pos, flags: &Flags) -> bool {
+        let below = ctx.bsi().get0(pos[0], pos[1] - 1, pos[2]);
+        match name {
+            "wheat" | "carrots" | "potatoes" => Self::state_age(state) >= 7,
+            "beetroots" => Self::state_age(state) >= 3,
+            "pumpkin" | "melon" => true,
+            "nether_wart" => Self::state_age(state) >= 3,
+            "cocoa" => Self::state_age(state) >= 2,
+            "sugar_cane" | "bamboo" | "cactus" => !flags.replant_crops || bare(&below.name) == name,
+            _ => false,
         }
-        let mut jobs: Vec<(i64, Job)> = Vec::new();
-        for p in core.cache.locations_of(game, &names, self.center, self.range, Some((self.center[1] - 6, self.center[1] + 8)), 300) {
-            let name = block_name(game, p);
-            if (name == "minecraft:nether_wart") && !core.settings.flag("replantNetherWart") && !ripe(game, p, &name) {
-                continue;
-            }
-            if ripe(game, p, &name) {
-                jobs.push((i64::from(dist_sq(feet, p)), Job::Harvest(p)));
-            }
-        }
-        if core.settings.flag("replantCrops") {
-            // Soil with nothing growing, and a seed for it in the hotbar.
-            for (_, _, seed, soil) in CROPS {
-                if *seed == "minecraft:nether_wart" && !core.settings.flag("replantNetherWart") {
-                    continue;
-                }
-                let Some(slot) = inv::slot_of(game, seed) else {
-                    continue;
-                };
-                let soils: HashSet<String> = [(*soil).to_owned()].into_iter().collect();
-                for base in core.cache.locations_of(game, &soils, self.center, self.range, Some((self.center[1] - 6, self.center[1] + 8)), 300) {
-                    if is_air_at(game, up(base, 1)) {
-                        jobs.push((i64::from(dist_sq(feet, base)), Job::Plant(base, slot)));
-                    }
-                }
-            }
-        }
-        jobs.sort_by_key(|j| j.0);
-        jobs.into_iter().map(|j| j.1).collect()
     }
 }

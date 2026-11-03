@@ -204,7 +204,7 @@ fn farm(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
         };
     }
     begin(b, game)?;
-    b.procs.farm.farm(origin, range);
+    b.procs.farm.farm(range, origin);
     b.core.say(game, "Farming");
     Ok(())
 }

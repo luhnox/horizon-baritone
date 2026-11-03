@@ -51,6 +51,11 @@ pub trait PlayerContext {
     fn block_reach_distance(&self) -> f64;
     /// RotationUtils.reachable: an aim at a block from here, if one of its faces can be hit within reach.
     fn reachable(&self, pos: Pos, reach: f64, would_sneak: bool) -> Option<Rotation>;
+    /// RotationUtils.reachableOffset: an aim at a point of a block, if the block is what is hit from there.
+    fn reachable_offset(&self, pos: Pos, offset: [f64; 3], reach: f64, would_sneak: bool) -> Option<Rotation>;
+    /// InventoryBehavior.throwaway(select, predicate): whether a hotbar slot holds an item `wanted` accepts; with
+    /// `select`, the slot is held.
+    fn select_item(&self, select: bool, wanted: &dyn Fn(&str) -> bool) -> bool;
     /// RayTraceUtils.rayTraceTowards: the block hit by an aim, and the face.
     fn ray_trace_towards(&self, rotation: Rotation, reach: f64, would_sneak: bool) -> Option<(Pos, [i32; 3])>;
     /// RayTraceUtils.inferSneakingEyePosition.
