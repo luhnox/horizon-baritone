@@ -35,7 +35,7 @@ use std::{
 };
 
 pub const ID: &str = "baritone";
-pub const VERSION: &str = "1.1.15";
+pub const VERSION: &str = "1.1.17";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -59,6 +59,8 @@ pub struct Core {
     pub aim: AimProcessor,
     /// LookBehavior: how a rotation a movement asked for is shown, and what the server was last sent.
     pub look: super::baritone_look::LookBehavior,
+    /// InventoryBehavior: the moves between the main inventory and the hotbar, and what a throwaway is.
+    pub inventory: super::baritone_inventory::InventoryBehavior,
     /// The cached world of the world and dimension being played in.
     pub world_data: super::baritone_world_data::WorldProvider,
     /// The game's block states as the pathfinder's, kept between ticks.
@@ -98,6 +100,7 @@ impl Core {
             pathing: PathingBehavior::new(),
             aim: AimProcessor::new(super::baritone_command::now_ms()),
             look: Default::default(),
+            inventory: Default::default(),
             world_data: Default::default(),
             states: std::rc::Rc::new(super::baritone_state_factory::StateFactory::new(game)),
             path_hooks: None,
@@ -474,6 +477,11 @@ impl Baritone {
         }
         self.core.mlg_tick(game, active);
         self.control_tick(game);
+        // Nobody listened to the block changes this tick (the elytra flight takes them in its own tick).
+        let _ = take_block_changes();
+        for line in self.core.inventory_tick(game) {
+            self.core.say(game, &line);
+        }
     }
 
     fn track_death(&mut self, game: &mut Game<'_>) {
@@ -487,8 +495,13 @@ impl Baritone {
                     dimension: dimension_of(game),
                     created: super::baritone_command::now_ms(),
                 };
+                let created = wp.created;
                 self.core.waypoints.add(wp);
                 self.core.save_waypoints(game);
+                // "Death position saved.", a link that walks back to it.
+                let click = text::ClickEvent::RunCommand(format!("{} wp goto death @ {created}", super::baritone_command::CLICK));
+                let message = super::baritone_command::clickable("Death position saved.", text::WHITE, click, Text::literal("Click to goto death"));
+                self.core.say_text(game, message);
             }
         }
         self.core.was_dead = dead;
@@ -596,6 +609,60 @@ pub fn with<R>(game: &mut Game<'_>, f: impl FnOnce(&mut Baritone, &mut Game<'_>)
     INSTANCE.with_borrow_mut(|slot| *slot = Some(b));
     BUSY.with(|b| b.set(false));
     Some(r)
+}
+
+thread_local! {
+    /// The blocks set since the last tick, as (x, y, z, solid): `BlockChangeEvent`. A thread-local of its own, because the game
+    /// sets blocks from inside calls Baritone makes.
+    static BLOCK_CHANGES: RefCell<Vec<(i32, i32, i32, bool)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// `BlockChangeEvent`: a block was set.
+pub fn block_changed(game: &Game<'_>, pos: [i32; 3], state: i32) {
+    let solid = !game.res.facts().is_air(horizon_world::registry::BlockStateId(state.max(0) as u32));
+    BLOCK_CHANGES.with_borrow_mut(|changes| {
+        if changes.len() < 1 << 16 {
+            changes.push((pos[0], pos[1], pos[2], solid));
+        }
+    });
+}
+
+/// The block changes since the last call.
+pub fn take_block_changes() -> Vec<(i32, i32, i32, bool)> {
+    BLOCK_CHANGES.with_borrow_mut(std::mem::take)
+}
+
+/// `BlockInteractEvent` USE, which WaypointBehavior listens to: a bed that is right-clicked becomes a bed waypoint, at its head.
+pub fn block_interact_use(game: &mut Game<'_>) {
+    if !game.native_window() {
+        return;
+    }
+    with(game, |b, game| {
+        if !b.core.settings.flag("doBedWaypoints") {
+            return;
+        }
+        let Some(pos) = game.bar_look_target() else { return };
+        let state = b.core.states.state(game.world.block(pos[0], pos[1], pos[2]));
+        if !state.bare_name().ends_with("_bed") {
+            return;
+        }
+        let mut at = pos;
+        if state.prop("part") == Some("foot") {
+            let step = match state.prop("facing") {
+                Some("north") => [0, 0, -1],
+                Some("south") => [0, 0, 1],
+                Some("west") => [-1, 0, 0],
+                _ => [1, 0, 0],
+            };
+            at = [pos[0] + step[0], pos[1], pos[2] + step[2]];
+        }
+        let dimension = dimension_of(game);
+        let exists = b.core.waypoints.all.iter().any(|w| w.tag == Tag::Bed && w.pos == at && w.dimension == dimension);
+        if !exists {
+            b.core.waypoints.add(Waypoint { tag: Tag::Bed, name: "bed".into(), pos: at, dimension, created: super::baritone_command::now_ms() });
+            b.core.save_waypoints(game);
+        }
+    });
 }
 
 /// `onPlayerUpdate` PRE, just before the player's motion reads its rotation.

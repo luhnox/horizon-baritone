@@ -541,9 +541,17 @@ impl ElytraBehavior {
     }
 
     /// Noticing the chunks that loaded, and packing as many as there is time for.
-    fn pack_tick(&mut self, game: &Game<'_>) {
+    fn pack_tick(&mut self, game: &Game<'_>, changes: Vec<(i32, i32, i32, bool)>) {
         if self.ids.is_none() {
             self.ids = Some(Self::pack_ids(game));
+        }
+        // `onBlockChange`: the blocks that were set go into the packed chunks they belong to.
+        let mut by_chunk: std::collections::HashMap<(i32, i32), Vec<(i32, i32, i32, bool)>> = std::collections::HashMap::new();
+        for change in changes {
+            by_chunk.entry((change.0 >> 4, change.2 >> 4)).or_default().push(change);
+        }
+        for ((cx, cz), list) in by_chunk {
+            self.npf.update_blocks(cx, cz, &list);
         }
         let revision = game.world.chunks.membership_revision();
         if revision != self.pack_revision {
@@ -556,7 +564,8 @@ impl ElytraBehavior {
             }
             self.pack_seen.retain(|k| loaded.contains(k));
         }
-        // Without block updates, the chunks around the player are packed again now and then.
+        // A chunk that was sent again keeps its place in the chunk set, so the chunks around the player are packed again now and
+        // then.
         if game.ticks.saturating_sub(self.last_repack) > 20 * 5 {
             self.last_repack = game.ticks;
             if let Some(p) = game.player.as_ref() {
@@ -609,7 +618,7 @@ impl ElytraBehavior {
 
     /// `onTick`: the part that runs whenever the process is in control.
     pub fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, flags: ProcessFlags) {
-        self.pack_tick(game);
+        self.pack_tick(game, super::baritone::take_block_changes());
         let cull_after = (core.settings.int("elytraTimeBetweenCacheCullSecs") * 20) as u64;
         let cull_distance = core.settings.int("elytraCacheCullDistance") as i32;
         let setback_delay = core.settings.int("elytraFireworkSetbackUseDelay") as i32;
@@ -740,7 +749,7 @@ impl ElytraBehavior {
     }
 
     /// `tickUseFireworks`.
-    fn use_fireworks(&mut self, core: &Core, game: &mut Game<'_>, start: V3, going_to: V3, is_boosted: bool, force: bool) {
+    fn use_fireworks(&mut self, core: &mut Core, game: &mut Game<'_>, start: V3, going_to: V3, is_boosted: bool, force: bool) {
         if self.remaining_set_back_ticks > 0 {
             let n = self.remaining_set_back_ticks;
             self.verbose(&format!("waiting for elytraFireworkSetbackUseDelay: {n}"));
@@ -754,12 +763,14 @@ impl ElytraBehavior {
         if self.remaining_firework_ticks > 0 || !wants_firework(start, going_to, is_boosted, force, core.settings.flag("elytraConserveFireworks"), core.settings.float("elytraFireworkSpeed"), player_y, motion) {
             return;
         }
-        // Boosting fireworks have a flight duration and no explosions.
-        let Some(slot) = (0..9).find(|&i| game.inventory.get(i).and_then(Option::as_ref).is_some_and(|s| s.count > 0 && firework_flight(s).is_some())) else {
+        // Boosting fireworks have a flight duration and no explosions; the Java asks for those and then for any firework, which
+        // is the same test.
+        let allow = core.settings.flag("allowInventory");
+        if !core.inventory.throwaway(game, &core.settings, true, &|s| firework_flight(s).is_some(), allow) {
             self.direct("no fireworks");
             return;
-        };
-        inv::select(game, slot);
+        }
+        let slot = game.selected;
         self.verbose(&format!("attempting to use firework{}", if force { " (forced)" } else { "" }));
         game.bar_use();
         let flight = game.inventory.get(slot).and_then(Option::as_ref).and_then(firework_flight).unwrap_or(1);

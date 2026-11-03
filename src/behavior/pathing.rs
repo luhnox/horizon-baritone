@@ -67,9 +67,18 @@ impl Core {
 
     /// Run `f` with the pathing behavior and the game as the player it walks.
     pub fn drive<R>(&mut self, game: &mut Game<'_>, f: impl FnOnce(&mut PathingBehavior, &GameCtx<'_, '_>, &Settings) -> R) -> R {
-        let Core { pathing, input, settings, throwaway, aim, look, states, world_data, .. } = self;
-        let ctx = GameCtx::new(game, input, settings, throwaway, aim, look, states, world_data.current.as_ref().map(|d| &d.cache));
+        let Core { pathing, input, settings, throwaway, aim, look, inventory, states, world_data, .. } = self;
+        let ctx = GameCtx::new(game, input, settings, throwaway, aim, look, inventory, states, world_data.current.as_ref().map(|d| &d.cache));
         f(pathing, &ctx, settings)
+    }
+
+    /// InventoryBehavior.onTick: the debug lines it has for the chat.
+    pub fn inventory_tick(&mut self, game: &mut Game<'_>) -> Vec<String> {
+        let tools = ToolSettings::of(&self.settings);
+        let pathing = self.pathing.is_pathing();
+        self.inventory.tick(game, &self.settings, &self.throwaway, pathing, &tools);
+        let lines = self.inventory.take_debug();
+        if self.settings.flag("chatDebug") { lines } else { Vec::new() }
     }
 
     /// WorldProvider and the chunk packer, once a tick: follow the world and dimension, queue the chunks that

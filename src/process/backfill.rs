@@ -135,21 +135,13 @@ impl Process for BackfillProcess {
     }
 }
 
-pub struct InventoryPauserProcess {
-    pause_requested_last_tick: bool,
-    safe_to_cancel_last_tick: bool,
-    ticks_of_stationary: i32,
-}
+/// The state of the process is the inventory behavior's (`Core::inventory`): the behavior asks it to hold the player still,
+/// and the tick below answers.
+pub struct InventoryPauserProcess;
 
 impl InventoryPauserProcess {
     pub fn new() -> Self {
-        Self { pause_requested_last_tick: false, safe_to_cancel_last_tick: false, ticks_of_stationary: 0 }
-    }
-
-    /// `stationaryForInventoryMove`: ask for the path to hold still; true once it has.
-    pub fn stationary_for_inventory_move(&mut self) -> bool {
-        self.pause_requested_last_tick = true;
-        self.safe_to_cancel_last_tick && self.ticks_of_stationary > 1
+        Self
     }
 }
 
@@ -174,17 +166,18 @@ impl Process for InventoryPauserProcess {
         true
     }
 
-    fn on_tick(&mut self, _core: &mut Core, game: &mut Game<'_>, _calc_failed: bool, is_safe_to_cancel: bool) -> PathingCommand {
-        self.safe_to_cancel_last_tick = is_safe_to_cancel;
-        if self.pause_requested_last_tick {
-            self.pause_requested_last_tick = false;
+    fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, _calc_failed: bool, is_safe_to_cancel: bool) -> PathingCommand {
+        let pauser = core.inventory.pauser();
+        pauser.safe_to_cancel_last_tick = is_safe_to_cancel;
+        if pauser.pause_requested_last_tick {
+            pauser.pause_requested_last_tick = false;
             let motion = game.player.as_ref().map_or(0.0, |p| (p.velocity.x * p.velocity.x + p.velocity.z * p.velocity.z).sqrt());
             if motion < 0.00001 {
-                self.ticks_of_stationary += 1;
+                pauser.ticks_of_stationary += 1;
             }
             return PathingCommand::RequestPause;
         }
-        self.ticks_of_stationary = 0;
+        pauser.ticks_of_stationary = 0;
         PathingCommand::Defer
     }
 

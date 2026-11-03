@@ -2,6 +2,7 @@
 // Horizon's player, world and inventory into what the ported Baritone code asks for. Block states are
 // built from Horizon's facts once per state id and shared.
 use super::baritone_aim::{AimProcessor, AimSettings};
+use super::baritone_inventory::InventoryBehavior;
 use super::baritone_look::{LookBehavior, Mode};
 use super::baritone_cached_world::CachedWorld;
 use super::baritone_block_state::{BlockState, Class, FluidKind};
@@ -35,6 +36,7 @@ pub struct GameCtx<'a, 'g> {
     throwaway: &'a [String],
     aim: &'a AimProcessor,
     look: RefCell<&'a mut LookBehavior>,
+    inventory: RefCell<&'a mut InventoryBehavior>,
     aim_settings: AimSettings,
     factory: &'a StateFactory,
     cache: Option<&'a CachedWorld>,
@@ -45,7 +47,7 @@ pub struct GameCtx<'a, 'g> {
 }
 
 impl<'a, 'g> GameCtx<'a, 'g> {
-    pub fn new(game: &'a mut Game<'g>, input: &'a mut InputHandler, settings: &'a Settings, throwaway: &'a [String], aim: &'a AimProcessor, look: &'a mut LookBehavior, factory: &'a StateFactory, cache: Option<&'a CachedWorld>) -> Self {
+    pub fn new(game: &'a mut Game<'g>, input: &'a mut InputHandler, settings: &'a Settings, throwaway: &'a [String], aim: &'a AimProcessor, look: &'a mut LookBehavior, inventory: &'a mut InventoryBehavior, factory: &'a StateFactory, cache: Option<&'a CachedWorld>) -> Self {
         let aim_settings = AimSettings::of(settings, f64::from(game.settings.sensitivity));
         Self {
             game: RefCell::new(game),
@@ -54,6 +56,7 @@ impl<'a, 'g> GameCtx<'a, 'g> {
             throwaway,
             aim,
             look: RefCell::new(look),
+            inventory: RefCell::new(inventory),
             aim_settings,
             factory,
             cache,
@@ -286,12 +289,9 @@ impl PlayerContext for GameCtx<'_, '_> {
     }
 
     fn select_item(&self, select: bool, wanted: &dyn Fn(&str) -> bool) -> bool {
+        // InventoryBehavior.throwaway(select, desired): the hotbar, the off hand, and the main inventory if allowInventory.
         let mut g = self.game.borrow_mut();
-        let Some(slot) = super::baritone_gworld::hotbar_slot(&g, |n| wanted(n)) else { return false };
-        if select {
-            inv::select(&mut g, slot);
-        }
-        true
+        self.inventory.borrow_mut().throwaway(&mut g, self.settings, select, &|s| wanted(&s.item), self.settings.flag("allowInventory"))
     }
 
     fn reachable(&self, pos: Pos, reach: f64, would_sneak: bool) -> Option<Rotation> {
@@ -346,16 +346,13 @@ impl PlayerContext for GameCtx<'_, '_> {
     }
 
     fn has_generic_throwaway(&self) -> bool {
-        self.player(|g| inv::throwaway_slot(g, self.throwaway).is_some())
+        let mut g = self.game.borrow_mut();
+        self.inventory.borrow_mut().has_generic_throwaway(&mut g, self.settings, self.throwaway)
     }
 
     fn select_throwaway_for_location(&self, select: bool, _x: i32, _y: i32, _z: i32) -> bool {
         let mut g = self.game.borrow_mut();
-        let Some(slot) = inv::throwaway_slot(&g, self.throwaway) else { return false };
-        if select {
-            inv::select(&mut g, slot);
-        }
-        true
+        self.inventory.borrow_mut().select_throwaway_for_location(&mut g, self.settings, self.throwaway, select, None)
     }
 
     fn switch_to_best_tool_for(&self, pos: Pos) {

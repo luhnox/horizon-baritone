@@ -9,7 +9,7 @@ This port is **not complete**. This file lists the classes of Baritone 1.21.4 (`
 | missing | not written |
 | n/a | Java or Minecraft machinery with no meaning in Rust on Horizon (mixin accessors, the event bus, toasts) |
 
-Rows below: 297 (classes that go together share a row). ported 153, partial 76, missing 29, n/a 39.
+Rows below: 297 (classes that go together share a row). ported 157, partial 74, missing 25, n/a 41.
 
 The settings are 243 of 252 (generated from Settings.java). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`; the processes and the path executor are the largest gap, and 
 
@@ -117,19 +117,19 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 
 | Java | Status | Rust or note |
 |---|---|---|
-| BlockChangeEvent | missing |  |
-| BlockInteractEvent | missing |  |
+| BlockChangeEvent | ported | hooks/block_change.rs: every set_block, read by the elytra packer |
+| BlockInteractEvent | partial | hooks/block_interact.rs: USE only, which is all the Java listens to |
 | ChatEvent | ported | hooks/chat.rs |
 | ChunkEvent | partial | WorldCache::note_chunks |
 | PacketEvent | n/a | Horizon has no packet hook |
-| PathEvent | missing |  |
+| PathEvent | n/a | PathingBehavior reads its own events; nothing outside listens |
 | PlayerUpdateEvent | n/a | native_tick |
 | RenderEvent | partial | hooks/lines.rs |
 | RotationMoveEvent | n/a |  |
-| SprintStateEvent | missing |  |
+| SprintStateEvent | n/a | the sprint is Baritone input Sprint, set where the Java overrides the state |
 | TabCompleteEvent | ported | hooks/suggest_hook.rs |
 | TickEvent | ported | hooks/tick.rs |
-| WorldEvent | partial |  |
+| WorldEvent | ported | WorldData::follow and LookBehavior::on_world_event |
 | Cancellable, EventState, ICancellable, Overrideable | n/a |  |
 | AbstractGameEventListener, IEventBus, IGameEventListener | n/a | Horizon hook points instead |
 
@@ -252,10 +252,10 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | Java | Status | Rust or note |
 |---|---|---|
 | Behavior | n/a |  |
-| InventoryBehavior | partial | src/behavior/inventory.rs: hotbar only |
+| InventoryBehavior | ported | src/behavior/inventory.rs: throwaway in the hotbar, the off hand and the main inventory, allowInventory swaps through the menu engine |
 | LookBehavior | ported | src/behavior/look.rs: Target.Mode, freeLook, blockFreeLook, antiCheatCompatibility, smoothLook, applied by baritone::look_pre and look_post around the player tick |
 | PathingBehavior | ported | src/behavior/pathing_behavior.rs: the search runs in slices of 2500 nodes a tick, there being no second thread |
-| WaypointBehavior | partial | the death waypoint (doDeathWaypoints) is ported, the bed waypoint is missing; waypoints are kept per world |
+| WaypointBehavior | ported | src/baritone.rs: death waypoint with its clickable message, bed waypoint on a right-click; kept per world |
 | ForkableRandom | n/a |  |
 
 ## main/cache

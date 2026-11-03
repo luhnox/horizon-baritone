@@ -1,6 +1,6 @@
 [mod]
 id = "baritone"
-version = "1.1.15"
+version = "1.1.17"
 priority = 100
 
 # The commit this was written against: the Horizon the instance plays. It uses the native hook
@@ -596,6 +596,27 @@ id = "keys_remote"
 kind = "HEAD"
 target = "horizon_client::game::remote::Game<'_>::tick_remote"
 helper = "hooks/keys_remote.rs"
+bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
+
+# BlockChangeEvent: every block the server (or the client's own prediction) sets. The elytra flight keeps its picture of the
+# solid blocks up to date from them.
+[[injection]]
+id = "block_change"
+kind = "HEAD"
+target = "horizon_client::game::remote::Game<'_>::set_block"
+helper = "hooks/block_change.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
+  { name = "state", ty = "i32", value = "state" },
+]
+
+# BlockInteractEvent (USE): the player right-clicks. A bed under the crosshair is remembered as a waypoint.
+[[injection]]
+id = "block_interact"
+kind = "HEAD"
+target = "horizon_client::game::remote::Game<'_>::remote_use_item_on"
+helper = "hooks/block_interact.rs"
 bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
 
 # Tab completion for a `#line`: the chat screen asks Baritone for the candidates when the text is not a
