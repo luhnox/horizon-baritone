@@ -10,7 +10,7 @@ use super::baritone_movement_diagonal as diagonal;
 use super::baritone_movement_downward as downward;
 use super::baritone_movement_parkour as parkour;
 use super::baritone_movement_pillar as pillar;
-use super::baritone_movement_state::MovementState;
+use super::baritone_movement_state::{Input, MovementState};
 use super::baritone_utils::Pos;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,6 +42,8 @@ pub struct Movement {
     pub force_safe_mode: bool,
     pub bridge_block_always_there: bool,
     pub calculated_while_loaded: bool,
+    /// The inputs the last tick held, for `chatDebug` (the Java has its debugger for this).
+    pub last_inputs: Vec<Input>,
 }
 
 fn above(p: Pos, n: i32) -> Pos {
@@ -67,6 +69,7 @@ impl Movement {
             force_safe_mode: false,
             bridge_block_always_there: true,
             calculated_while_loaded: true,
+            last_inputs: Vec::new(),
         }
     }
 

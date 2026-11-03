@@ -368,6 +368,21 @@ mod paper {
         fn is_nether(&self) -> bool {
             false
         }
+        fn is_sprinting(&self) -> bool {
+            self.held.borrow().contains(&Input::Sprint)
+        }
+        fn is_in_lava(&self) -> bool {
+            false
+        }
+        fn on_climbable(&self) -> bool {
+            false
+        }
+        fn has_unsupported_motion_effects(&self) -> bool {
+            false
+        }
+        fn movement_speed(&self) -> f64 {
+            0.13
+        }
         fn is_looking_at(&self, _pos: Pos) -> bool {
             false
         }
@@ -411,6 +426,12 @@ mod paper {
         fn select_hotbar_slot(&self, _slot: usize) {}
         fn falling_block_near(&self, _pos: Pos) -> bool {
             false
+        }
+        fn mobs_to_avoid(&self) -> Vec<Pos> {
+            Vec::new()
+        }
+        fn mob_spawners_near(&self) -> Vec<Pos> {
+            Vec::new()
         }
         fn update_look_target(&self, rotation: Rotation, _force: bool) {
             self.yaw.set(rotation.yaw);

@@ -1,7 +1,6 @@
 // baritone.pathing.path.PathExecutor: walks a path, one movement at a time. Each tick it works out which
 // movement the player is in, checks that the movement is still possible and not taking too long, and lets
 // it steer. It also decides when to sprint, when to skip ahead, and when to give up on the path.
-// Not ported yet: SprintJump (the physics planned sprint jump), which only runs with sprintJumping on.
 use super::baritone_calc_path::Path;
 use super::baritone_calculation_context::CalculationContext;
 use super::baritone_costs::COST_INF;
@@ -11,6 +10,7 @@ use super::baritone_movement_helper as mh;
 use super::baritone_movement_state::{Input, MovementState, MovementStatus};
 use super::baritone_player_context::PlayerContext;
 use super::baritone_rotation::calc_rotation_from_vec3d;
+use super::baritone_sprint_jump::{SprintJump, MAX_TICKS as FLIGHT_MAX_TICKS};
 use super::baritone_settings::Settings;
 use super::baritone_utils::Pos;
 use std::collections::HashSet;
@@ -52,6 +52,8 @@ pub struct PathExecutor {
     to_place: HashSet<Pos>,
     to_walk_into: HashSet<Pos>,
     sprint_next_tick: bool,
+    /// The sprint jump being flown, if any.
+    flight: Option<SprintJump>,
     /// Cut-off tracking for `closestPathPos` etc.
     pub log: Vec<String>,
     depth: u32,
@@ -81,6 +83,7 @@ impl PathExecutor {
             sprint_next_tick: false,
             log: Vec::new(),
             depth: 0,
+            flight: None,
         }
     }
 
@@ -133,6 +136,9 @@ impl PathExecutor {
 
     fn on_tick_inner(&mut self, e: &ExecEnv) -> bool {
         let ctx = e.ctx;
+        if self.flight.is_some() && self.fly(e) {
+            return false; // mid air is not a stable state, no matter what the movement we left behind thinks
+        }
         if self.path_position == self.path.length() - 1 {
             self.path_position += 1;
         }
@@ -250,6 +256,10 @@ impl PathExecutor {
             self.on_tick(e);
             return true;
         }
+        if e.settings.flag("chatDebug") && self.ticks_on_current % 40 == 39 {
+            let m = &self.path.movements[self.path_position];
+            self.debug(format!("{:?} {:?} -> {:?} at {:?} y {:.2}: {:?} holding {:?}", m.kind, m.src, m.dest, ctx.player_feet(), ctx.position()[1], movement_status, m.last_inputs));
+        }
         self.sprint_next_tick = self.should_sprint_next_tick(e, &env);
         if !self.sprint_next_tick {
             ctx.set_sprinting(false); // letting go of control does not make you stop sprinting
@@ -260,7 +270,7 @@ impl PathExecutor {
             self.cancel(e);
             return true;
         }
-        can_cancel // movement is in progress, but if it reports cancellable, PathingBehavior may cut onto the next path
+        can_cancel && self.flight.is_none() // movement is in progress, but if it reports cancellable, PathingBehavior may cut onto the next path
     }
 
     fn center_distance(pos: Pos, p: [f64; 3]) -> f64 {
@@ -336,6 +346,13 @@ impl PathExecutor {
         let pp = self.path_position;
         let len = self.path.length();
         let current_kind = self.path.movements[pp].kind;
+        if e.settings.flag("sprintJumping") && !ctx.is_input_forced_down(Input::Sneak) {
+            self.flight = SprintJump::plan(e, &self.path, pp, env);
+            if self.flight.is_some() {
+                self.steer(e, true);
+                return true;
+            }
+        }
         if current_kind == Kind::Traverse && pp + 3 < len {
             if self.path.movements[pp + 1].kind == Kind::Ascend && self.sprintable_ascend(e, pp, pp + 1, pp + 2) {
                 if self.skip_now(e, pp) {
@@ -622,6 +639,44 @@ impl PathExecutor {
         matches!(next.kind, Kind::Diagonal { .. }) && e.settings.flag("allowOvershootDiagonalDescend")
     }
 
+    /// True if we're still in the air and this tick is handled.
+    fn fly(&mut self, e: &ExecEnv) -> bool {
+        let ctx = e.ctx;
+        let airborne = !ctx.on_ground() && !ctx.is_in_water() && !ctx.is_in_lava() && !ctx.on_climbable();
+        if airborne && self.flight.as_ref().is_some_and(|f| f.ticks < FLIGHT_MAX_TICKS) && e.settings.flag("sprintJumping") {
+            self.steer(e, false);
+            self.sprint_next_tick = true;
+            return true;
+        }
+        // We probably flew over a few movements, pick up at whichever one we came down in (diagonal side cells
+        // count). Anywhere else and the usual valid positions / off path recovery takes it from here.
+        let reach = self.flight.as_ref().map_or(0, |f| f.floors.len());
+        let end = self.path.movements.len().min(self.path_position + reach);
+        for i in self.path_position..end {
+            if self.path.movements[i].valid_positions().contains(&ctx.player_feet()) {
+                self.path_position = i;
+                break;
+            }
+        }
+        self.flight = None;
+        self.on_change_in_path_position(e);
+        false
+    }
+
+    fn steer(&mut self, e: &ExecEnv, takeoff: bool) {
+        // The movements steer at their own dest and drop W the moment our feet are a block up ("Wrong Y
+        // coordinate"), which was the mid air stall, so while we're up here nobody else gets a say. Space only on
+        // takeoff: letting go in the air resets the vanilla 10 tick jump delay.
+        let ctx = e.ctx;
+        ctx.clear_all_keys();
+        if let Some(flight) = self.flight.as_mut() {
+            let rotation = flight.steer(ctx.position(), ctx.delta_movement(), ctx.player_rotations().pitch);
+            ctx.update_look_target(rotation, false);
+        }
+        ctx.set_input_force_state(Input::MoveForward, true);
+        ctx.set_input_force_state(Input::Jump, takeoff);
+    }
+
     fn on_change_in_path_position(&mut self, e: &ExecEnv) {
         e.ctx.clear_all_keys();
         self.ticks_on_current = 0;
@@ -662,6 +717,7 @@ impl PathExecutor {
                     ret.current_movement_original_cost_estimate = self.current_movement_original_cost_estimate;
                     ret.cost_estimate_index = self.cost_estimate_index;
                     ret.ticks_on_current = self.ticks_on_current;
+                    ret.flight = self.flight.clone(); // a new path showing up doesn't make us any less airborne
                     Some(ret)
                 }
                 None => self.cut_if_too_long(e),
@@ -681,6 +737,7 @@ impl PathExecutor {
             ret.current_movement_original_cost_estimate = self.current_movement_original_cost_estimate;
             ret.cost_estimate_index = self.cost_estimate_index.map(|i| i.saturating_sub(cutoff_amt));
             ret.ticks_on_current = self.ticks_on_current;
+            ret.flight = self.flight.clone();
             return Some(ret);
         }
         None

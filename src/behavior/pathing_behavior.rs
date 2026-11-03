@@ -4,6 +4,7 @@
 // where it should be. The Java runs the search on another thread; here it runs in slices of nodes per
 // tick (`NODES_PER_TICK`), with the Java's timeouts counted in ticks.
 use super::baritone_astar::{AStarPathFinder, Status};
+use super::baritone_avoidance::Avoidance;
 use super::baritone_calc_path::Path;
 use super::baritone_calculation_context::{CalculationContext, ToolSet};
 use super::baritone_executor::{ExecEnv, PathExecutor};
@@ -533,6 +534,10 @@ impl PathingBehavior {
                     favoring.insert(*p, coeff);
                 }
             }
+        }
+        // Mobs and mob spawners make their surroundings dearer.
+        for avoid in Avoidance::create(settings, &|| ctx.mobs_to_avoid(), &|| ctx.mob_spawners_near()) {
+            avoid.apply_spherical(&mut favoring);
         }
         let feet = ctx.player_feet();
         let mut real_start = start;

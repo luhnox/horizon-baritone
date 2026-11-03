@@ -3,6 +3,7 @@
 // click.rs call the functions at the bottom; each takes the instance out of its cell for the length of
 // the call, so nothing is ever borrowed twice (the first version borrowed its state while logging and
 // brought the game down on the first command).
+use super::baritone_aim::AimProcessor;
 use super::baritone_command as commands;
 use super::baritone_gworld::{on_server, player_pos, WorldCache};
 use super::baritone_legacy_helper::Cell;
@@ -54,6 +55,8 @@ pub struct Core {
     pub settings: Settings,
     pub input: Input,
     pub pathing: PathingBehavior,
+    /// LookBehavior's aim processor: the noise and the mouse steps of every aim.
+    pub aim: AimProcessor,
     pub dig: DigState,
     pub cache: WorldCache,
     pub selections: SelectionManager,
@@ -83,6 +86,7 @@ impl Core {
             settings,
             input: Input::default(),
             pathing: PathingBehavior::new(),
+            aim: AimProcessor::new(super::baritone_command::now_ms()),
             dig: DigState::default(),
             cache: WorldCache::default(),
             selections: SelectionManager::default(),

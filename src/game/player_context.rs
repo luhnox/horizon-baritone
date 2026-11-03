@@ -1,6 +1,7 @@
 // The game as the pathfinder's PlayerContext, BlockStateInterface and ToolSet: the one place that turns
 // Horizon's player, world and inventory into what the ported Baritone code asks for. Block states are
 // built from Horizon's facts once per state id and shared.
+use super::baritone_aim::{AimProcessor, AimSettings};
 use super::baritone_block_state::{parse_props, BlockState, Class, FluidKind};
 use super::baritone_block_state_interface::BlockStateInterface;
 use super::baritone_calculation_context::{PlayerFacts, ToolSet};
@@ -24,17 +25,22 @@ pub struct GameCtx<'a, 'g> {
     input: RefCell<&'a mut InputHandler>,
     settings: &'a Settings,
     throwaway: &'a [String],
+    aim: &'a AimProcessor,
+    aim_settings: AimSettings,
     states: RefCell<HashMap<u32, Rc<BlockState>>>,
     tool_ticks: RefCell<HashMap<u32, f64>>,
 }
 
 impl<'a, 'g> GameCtx<'a, 'g> {
-    pub fn new(game: &'a mut Game<'g>, input: &'a mut InputHandler, settings: &'a Settings, throwaway: &'a [String]) -> Self {
+    pub fn new(game: &'a mut Game<'g>, input: &'a mut InputHandler, settings: &'a Settings, throwaway: &'a [String], aim: &'a AimProcessor) -> Self {
+        let aim_settings = AimSettings::of(settings, f64::from(game.settings.sensitivity));
         Self {
             game: RefCell::new(game),
             input: RefCell::new(input),
             settings,
             throwaway,
+            aim,
+            aim_settings,
             states: RefCell::new(HashMap::new()),
             tool_ticks: RefCell::new(HashMap::new()),
         }
@@ -127,6 +133,18 @@ impl BlockStateInterface for GameCtx<'_, '_> {
 
     fn min_y(&self) -> i32 {
         horizon_client::chunk::MIN_Y
+    }
+
+    /// `BetterWorldBorder.entirelyContains`.
+    fn entirely_contains(&self, x: i32, z: i32) -> bool {
+        let [min_x, min_z, max_x, max_z] = self.game.borrow().border.bounds();
+        f64::from(x) + 1.0 > min_x && f64::from(x) < max_x && f64::from(z) + 1.0 > min_z && f64::from(z) < max_z
+    }
+
+    /// `BetterWorldBorder.canPlaceAt`: a block cannot go at the very edge, against a block outside the border.
+    fn can_place_at(&self, x: i32, z: i32) -> bool {
+        let [min_x, min_z, max_x, max_z] = self.game.borrow().border.bounds();
+        f64::from(x) > min_x && f64::from(x) + 1.0 < max_x && f64::from(z) > min_z && f64::from(z) + 1.0 < max_z
     }
 
     fn max_y(&self) -> i32 {
@@ -242,6 +260,29 @@ impl PlayerContext for GameCtx<'_, '_> {
         self.player(|g| g.native_player().is_some_and(|p| p.dimension == "minecraft:the_nether"))
     }
 
+    fn is_sprinting(&self) -> bool {
+        self.player(|g| g.player.as_ref().is_some_and(|p| p.sprinting))
+    }
+
+    fn is_in_lava(&self) -> bool {
+        self.player(|g| g.player.as_ref().is_some_and(|p| p.is_in_lava()))
+    }
+
+    fn on_climbable(&self) -> bool {
+        self.player(|g| g.player.as_ref().is_some_and(|p| p.last_climbable.is_some()))
+    }
+
+    fn has_unsupported_motion_effects(&self) -> bool {
+        self.player(|g| {
+            let s = g.potions.effects.status();
+            s.jump_boost.is_some() || s.slow_falling || s.levitation.is_some()
+        })
+    }
+
+    fn movement_speed(&self) -> f64 {
+        0.13 // 0.1 base, times the sprint modifier
+    }
+
     fn is_looking_at(&self, pos: Pos) -> bool {
         self.selected_block() == Some(pos)
     }
@@ -296,7 +337,7 @@ impl PlayerContext for GameCtx<'_, '_> {
     }
 
     fn peek_rotation(&self, rotation: Rotation) -> Rotation {
-        rotation // aim is not smoothed here: what is asked is what is turned to
+        self.aim.peek_rotation(rotation, self.player_rotations(), &self.aim_settings)
     }
 
     fn calculation_facts(&self) -> PlayerFacts {
@@ -349,10 +390,60 @@ impl PlayerContext for GameCtx<'_, '_> {
         false
     }
 
+    fn mobs_to_avoid(&self) -> Vec<Pos> {
+        // Every Mob, but a spider by day, an unangered zombified piglin and an enderman nobody is looking at,
+        // none of which can be told from here.
+        self.player(|g| {
+            g.mobs
+                .iter()
+                .filter(|m| m.alive())
+                .filter(|m| !matches!(&*m.kind.id, "minecraft:spider" | "minecraft:cave_spider" | "minecraft:zombified_piglin" | "minecraft:enderman"))
+                .map(|m| feet_of([m.position.x, m.position.y, m.position.z]))
+                .collect()
+        })
+    }
+
+    fn mob_spawners_near(&self) -> Vec<Pos> {
+        let feet = self.player_feet();
+        let g = self.game.borrow();
+        let ids: std::collections::HashSet<u32> = g.res.facts().states.iter().enumerate().filter(|(_, s)| &*s.name == "minecraft:spawner").map(|(i, _)| i as u32).collect();
+        if ids.is_empty() {
+            return Vec::new();
+        }
+        let mut found = Vec::new();
+        let (cx, cz) = (feet[0] >> 4, feet[2] >> 4);
+        for x in cx - 2..=cx + 2 {
+            for z in cz - 2..=cz + 2 {
+                let Some(chunk) = g.world.chunks.get(&(x, z)) else { continue };
+                for (s, section) in chunk.sections.iter().enumerate() {
+                    if !section.blocks.maybe_has(|v| ids.contains(&(v.0 as u32))) {
+                        continue;
+                    }
+                    let base = horizon_client::chunk::MIN_Y + s as i32 * 16;
+                    for y in base..base + 16 {
+                        for lz in 0..16 {
+                            for lx in 0..16 {
+                                if ids.contains(&(chunk.get(lx, y, lz).0 as u32)) {
+                                    found.push([x * 16 + lx, y, z * 16 + lz]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        found.sort_by_key(|p| (p[0] - feet[0]).pow(2) + (p[1] - feet[1]).pow(2) + (p[2] - feet[2]).pow(2));
+        found.truncate(1);
+        found
+    }
+
     fn update_look_target(&self, rotation: Rotation, _force: bool) {
+        // LookBehavior.updateTarget in its CLIENT mode: the camera turns (there is no silent server-side rotation
+        // here), by whole mouse steps and with the noise of the aim processor.
+        let actual = self.peek_rotation(rotation);
         let mut g = self.game.borrow_mut();
-        g.yaw = rotation.yaw;
-        g.pitch = rotation.pitch.clamp(-90.0, 90.0);
+        g.yaw = actual.yaw;
+        g.pitch = actual.pitch.clamp(-90.0, 90.0);
     }
 
     fn clear_all_keys(&self) {

@@ -4,6 +4,7 @@
 // here is what the Java keeps in BlockBreakHelper and BlockPlaceHelper for the processes that break and
 // place blocks on their own, outside a path (mining a shaft, farming, building).
 use super::baritone::Core;
+use super::baritone_aim::AimSettings;
 use super::baritone_game_ctx::GameCtx;
 use super::baritone_gworld::{best_tool, block_name};
 use super::baritone_inventory as inv;
@@ -57,8 +58,8 @@ impl Core {
 
     /// Run `f` with the pathing behavior and the game as the player it walks.
     pub fn drive<R>(&mut self, game: &mut Game<'_>, f: impl FnOnce(&mut PathingBehavior, &GameCtx<'_, '_>, &Settings) -> R) -> R {
-        let Core { pathing, input, settings, throwaway, .. } = self;
-        let ctx = GameCtx::new(game, input, settings, throwaway);
+        let Core { pathing, input, settings, throwaway, aim, .. } = self;
+        let ctx = GameCtx::new(game, input, settings, throwaway, aim);
         f(pathing, &ctx, settings)
     }
 
@@ -102,6 +103,9 @@ impl Core {
     /// PathingBehavior.onTick, from the first half to the last, around what the processes asked for.
     pub fn path_tick(&mut self, game: &mut Game<'_>, command: Option<&PathingCommand>, real_process_changed: bool) -> Vec<String> {
         let ticks = game.ticks;
+        // LookBehavior.onTick: the noise of this game tick.
+        let aim_settings = AimSettings::of(&self.settings, f64::from(game.settings.sensitivity));
+        self.aim.tick(&aim_settings);
         self.drive(game, |p, ctx, s| p.begin_tick(ctx, s, ctx));
         if self.dig.active.is_some() {
             self.dig_step(game);

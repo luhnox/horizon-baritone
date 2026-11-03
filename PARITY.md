@@ -9,7 +9,7 @@ This port is **not complete**. This file lists the classes of Baritone 1.21.4 (`
 | missing | not written |
 | n/a | Java or Minecraft machinery with no meaning in Rust on Horizon (mixin accessors, the event bus, toasts) |
 
-Rows below: 297 (classes that go together share a row). ported 78, partial 114, missing 66, n/a 39.
+Rows below: 297 (classes that go together share a row). ported 99, partial 94, missing 65, n/a 39.
 
 The settings are 243 of 252 (generated from Settings.java). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`; the processes and the path executor are the largest gap, and the Nether elytra pathfinder (22 files) is not started.
 
@@ -29,7 +29,7 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 |---|---|---|
 | IBehavior | n/a | Rust has no behavior registry |
 | ILookBehavior | partial | src/behavior/look.rs: plain turning, no aim processors |
-| IPathingBehavior | partial | src/behavior/pathing.rs |
+| IPathingBehavior | ported | src/behavior/pathing_behavior.rs |
 
 ## api/behavior/look
 
@@ -138,8 +138,8 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | Java | Status | Rust or note |
 |---|---|---|
 | IPath | ported | Path in src/pathing/calc/path.rs |
-| IPathFinder | partial | AStar |
-| IPathingControlManager | partial | Baritone::control_tick |
+| IPathFinder | ported | AStarPathFinder |
+| IPathingControlManager | ported | pre_tick and post_tick in pathing_behavior.rs, executeProcesses in Baritone::control_tick |
 | Goal | ported | src/api/goals.rs |
 | GoalAxis | ported |  |
 | GoalBlock | ported |  |
@@ -153,9 +153,9 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | GoalXZ | ported |  |
 | GoalYLevel | ported |  |
 | ActionCosts | ported | src/pathing/costs.rs (with swimming and the 4097-entry fall table) |
-| IMovement | partial |  |
-| MovementStatus | partial |  |
-| IPathExecutor | partial | src/pathing/path.rs |
+| IMovement | ported | src/pathing/movement/movement.rs |
+| MovementStatus | ported | src/behavior/movement_state.rs |
+| IPathExecutor | ported | src/pathing/path/executor.rs |
 
 ## api/process
 
@@ -228,16 +228,16 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | BlockUtils | partial |  |
 | BooleanBinaryOperator, BooleanBinaryOperators | missing |  |
 | Helper | n/a | Core::say* |
-| IInputOverrideHandler | partial | src/behavior/input.rs |
-| IPlayerContext, IPlayerController | partial | Game |
+| IInputOverrideHandler | ported | src/behavior/input.rs |
+| IPlayerContext, IPlayerController | ported | src/behavior/player_context.rs, game/player_context.rs |
 | MyChunkPos, Pair, TypeUtils, VecUtils | n/a | Rust types |
 | NotificationHelper, BaritoneToast | n/a | no desktop toast |
 | PathCalculationResult | partial | Status |
-| RayTraceUtils | partial | Game::clip_ray |
-| Rotation, RotationUtils | partial | src/behavior/look.rs |
+| RayTraceUtils | ported | GameCtx::ray_trace_towards |
+| Rotation, RotationUtils | ported | src/utils/rotation.rs, GameCtx::reachable |
 | SettingsUtil | partial | Settings::load |
 | IItemStack, ILootTable | n/a | no loot tables |
-| Input | partial | src/behavior/input.rs |
+| Input | ported | src/behavior/movement_state.rs |
 | IGoalRenderPos | partial | Goal::render_pos |
 
 ## main
@@ -254,7 +254,7 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | Behavior | n/a |  |
 | InventoryBehavior | partial | src/behavior/inventory.rs: hotbar only |
 | LookBehavior | partial | src/behavior/look.rs |
-| PathingBehavior | partial | src/behavior/pathing.rs |
+| PathingBehavior | ported | src/behavior/pathing_behavior.rs: the search runs in slices of 2500 nodes a tick, there being no second thread |
 | WaypointBehavior | partial | death waypoint only |
 | ForkableRandom | n/a |  |
 
@@ -339,7 +339,7 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 
 | Java | Status | Rust or note |
 |---|---|---|
-| AStarPathFinder | ported | src/pathing/calc/a_star.rs: the Java search, resumable in slices; tested; not yet wired into the game |
+| AStarPathFinder | ported | src/pathing/calc/a_star.rs: the Java search, resumable in slices; tested; wired into the game through game/player_context.rs |
 | AbstractNodeCostSearch | ported | src/pathing/calc/a_star.rs: the seven coefficients and bestSoFar |
 | Path | ported | src/pathing/calc/path.rs |
 | PathNode | ported | src/pathing/calc/a_star.rs |
@@ -351,10 +351,10 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | Java | Status | Rust or note |
 |---|---|---|
 | CalculationContext | ported | src/pathing/movement/calculation_context.rs |
-| Movement | partial | data, costs and valid positions ported (movement.rs); updateState, swimming and aim are not |
-| MovementHelper | partial | the cost half ported (movement_helper.rs); openDoors, attemptToPlaceABlock, moveTowards* are not |
+| Movement | ported | movement.rs (data, costs, valid positions) and movement_exec.rs (updateState of the eight movements) |
+| MovementHelper | ported | movement_helper.rs (costs) and movement_exec.rs (openDoors, attemptToPlaceABlock, moveTowards) |
 | MovementOption | n/a |  |
-| MovementState | partial | Controls, the older one |
+| MovementState | ported | src/behavior/movement_state.rs |
 | Moves | ported | src/pathing/movement/moves.rs |
 
 ## main/pathing/movement/movements
@@ -375,8 +375,8 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | Java | Status | Rust or note |
 |---|---|---|
 | CutoffPath | ported | src/pathing/calc/path.rs (cut_off) |
-| PathExecutor | partial | src/pathing/path.rs |
-| SplicedPath | missing | no path splicing |
+| PathExecutor | ported | src/pathing/path/executor.rs |
+| SplicedPath | ported | src/pathing/calc/path.rs (try_splice) |
 | SprintJump | missing |  |
 
 ## main/pathing/precompute
@@ -448,16 +448,16 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | BaritoneProcessHelper | n/a |  |
 | BlockBreakHelper | partial | behavior/pathing.rs (dig_step) |
 | BlockPlaceHelper | partial | behavior/pathing.rs (click_block) |
-| BlockStateInterface | partial | src/game/world.rs |
+| BlockStateInterface | ported | src/utils/block_state_interface.rs, answered by game/player_context.rs |
 | BlockStateInterfaceAccessWrapper | n/a |  |
 | GuiClick | missing |  |
 | IRenderer | partial | src/game/render.rs |
-| InputOverrideHandler | partial | src/behavior/input.rs |
+| InputOverrideHandler | ported | src/behavior/input.rs |
 | PathRenderer | partial | src/game/render.rs |
 | PathingCommandContext | missing |  |
-| PathingControlManager | partial | Baritone::control_tick |
+| PathingControlManager | ported | Baritone::control_tick and pathing_behavior.rs (pre_tick, post_tick) |
 | PlayerMovementInput | n/a | the game reads keys |
-| ToolSet | partial | best_tool |
+| ToolSet | ported | GameCtx::str_vs_block, game/player_context.rs |
 
 ## main/utils/accessor
 

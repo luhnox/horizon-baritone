@@ -292,6 +292,7 @@ impl Movement {
             ctx.update_look_target(rotation, state.target.force_rotations);
         }
         ctx.clear_all_keys();
+        self.last_inputs = state.inputs.iter().filter(|(_, on)| **on).map(|(i, _)| *i).collect();
         for (input, forced) in &state.inputs {
             ctx.set_input_force_state(*input, *forced);
         }

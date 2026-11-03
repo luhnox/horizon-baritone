@@ -165,6 +165,12 @@ name = "baritone_rotation"
 source = "src/utils/rotation.rs"
 
 [[module]]
+id = "mod_aim"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_aim"
+source = "src/behavior/aim.rs"
+
+[[module]]
 id = "mod_movement_state"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_movement_state"
@@ -181,6 +187,18 @@ id = "mod_movement_exec"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_movement_exec"
 source = "src/pathing/movement/movement_exec.rs"
+
+[[module]]
+id = "mod_avoidance"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_avoidance"
+source = "src/pathing/avoidance.rs"
+
+[[module]]
+id = "mod_sprint_jump"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_sprint_jump"
+source = "src/pathing/path/sprint_jump.rs"
 
 [[module]]
 id = "mod_executor"

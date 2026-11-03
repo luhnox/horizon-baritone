@@ -34,6 +34,13 @@ pub trait PlayerContext {
     fn water_fluid_height(&self) -> f64;
     fn set_sprinting(&self, on: bool);
     fn is_nether(&self) -> bool;
+    fn is_sprinting(&self) -> bool;
+    fn is_in_lava(&self) -> bool;
+    fn on_climbable(&self) -> bool;
+    /// Jump boost, slow falling or levitation: the sprint jump simulation knows nothing of them.
+    fn has_unsupported_motion_effects(&self) -> bool;
+    /// `Player.getSpeed`: the movement speed while sprinting.
+    fn movement_speed(&self) -> f64;
 
     // ---- what the crosshair is on
     fn is_looking_at(&self, pos: Pos) -> bool;
@@ -65,6 +72,10 @@ pub trait PlayerContext {
     fn select_hotbar_slot(&self, slot: usize);
 
     // ---- entities
+    /// Where the mobs worth steering clear of are (Avoidance.create's filters).
+    fn mobs_to_avoid(&self) -> Vec<Pos>;
+    /// The mob spawners in the loaded chunks around the player (the Java asks its cached world for one).
+    fn mob_spawners_near(&self) -> Vec<Pos>;
     /// Whether a falling block is on the way into this block position.
     fn falling_block_near(&self, pos: Pos) -> bool;
 
