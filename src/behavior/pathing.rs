@@ -5,6 +5,8 @@
 // place blocks on their own, outside a path (mining a shaft, farming, building).
 use super::baritone::Core;
 use super::baritone_aim::AimSettings;
+use super::baritone_calculation_context::{CalculationContext, CostHooks};
+use super::baritone_player_context::PlayerContext;
 use super::baritone_game_ctx::GameCtx;
 use super::baritone_gworld::{best_tool, block_name};
 use super::baritone_inventory as inv;
@@ -61,6 +63,20 @@ impl Core {
         let Core { pathing, input, settings, throwaway, aim, .. } = self;
         let ctx = GameCtx::new(game, input, settings, throwaway, aim);
         f(pathing, &ctx, settings)
+    }
+
+    /// Run `f` with a CalculationContext made now (`new CalculationContext(baritone)`).
+    pub fn with_calc<R>(&mut self, game: &mut Game<'_>, f: impl FnOnce(&CalculationContext, &GameCtx<'_, '_>, &Settings) -> R) -> R {
+        self.with_calc_hooks(game, None, f)
+    }
+
+    /// The same with a subclass's overrides.
+    pub fn with_calc_hooks<R>(&mut self, game: &mut Game<'_>, hooks: Option<std::rc::Rc<dyn CostHooks>>, f: impl FnOnce(&CalculationContext, &GameCtx<'_, '_>, &Settings) -> R) -> R {
+        self.drive(game, |_, ctx, s| {
+            let facts = PlayerContext::calculation_facts(ctx);
+            let calc = CalculationContext::new(s, PlayerContext::bsi(ctx), ctx, &facts).with_hooks(hooks);
+            f(&calc, ctx, s)
+        })
     }
 
     /// The ticks the path being walked has left (PathingBehavior.ticksRemainingInSegment).

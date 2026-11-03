@@ -11,6 +11,8 @@ pub mod baritone_goals;
 pub mod baritone_legacy_helper;
 #[path = "api/block_optional_meta.rs"]
 pub mod baritone_bom;
+#[path = "cache/world_scanner.rs"]
+pub mod baritone_world_scanner;
 #[path = "api/settings.rs"]
 pub mod baritone_settings;
 #[path = "selection/selection.rs"]

@@ -223,10 +223,12 @@ fn goto(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
         return Ok(());
     }
     args.require_max(1)?;
-    let (names, label) = blocks(b, game, args)?;
+    let word = args.rest().into_iter().next().ok_or_else(|| CommandError::new("Not enough arguments."))?;
+    let bom = super::baritone_command::block_optional_meta(b, game, &word)?;
+    while args.optional_string().is_some() {}
     begin(b, game)?;
-    b.core.say(game, &format!("Getting to {label}"));
-    b.procs.get_to_block.get_to_block(names, label);
+    let Baritone { core, procs, .. } = b;
+    procs.get_to_block.get_to_block(core, game, bom);
     Ok(())
 }
 

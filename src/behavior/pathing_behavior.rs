@@ -27,6 +27,8 @@ pub enum PathingCommand {
     RequestPause,
     /// Drop the path and take this goal.
     CancelAndSetGoal(GoalRef),
+    /// Drop the path and the goal (`new PathingCommand(null, CANCEL_AND_SET_GOAL)`).
+    CancelAndClearGoal,
     /// Take this goal, and drop the path if it no longer leads there.
     RevalidateGoalAndPath(GoalRef),
     /// The same, and search at once.
@@ -43,6 +45,7 @@ impl PathingCommand {
             PathingCommand::SetGoalAndPath(g) => ("SET_GOAL_AND_PATH", Some(g)),
             PathingCommand::RequestPause => ("REQUEST_PAUSE", None),
             PathingCommand::CancelAndSetGoal(g) => ("CANCEL_AND_SET_GOAL", Some(g)),
+            PathingCommand::CancelAndClearGoal => ("CANCEL_AND_SET_GOAL", None),
             PathingCommand::RevalidateGoalAndPath(g) => ("REVALIDATE_GOAL_AND_PATH", Some(g)),
             PathingCommand::ForceRevalidateGoalAndPath(g) => ("FORCE_REVALIDATE_GOAL_AND_PATH", Some(g)),
             PathingCommand::SetGoalAndPause(g) => ("SET_GOAL_AND_PAUSE", Some(g)),
@@ -288,6 +291,10 @@ impl PathingBehavior {
             PathingCommand::RequestPause => self.request_pause(),
             PathingCommand::CancelAndSetGoal(g) => {
                 self.secret_internal_set_goal(Some(g.clone()));
+                self.cancel_segment_if_safe(ctx);
+            }
+            PathingCommand::CancelAndClearGoal => {
+                self.secret_internal_set_goal(None);
                 self.cancel_segment_if_safe(ctx);
             }
             PathingCommand::ForceRevalidateGoalAndPath(g) | PathingCommand::RevalidateGoalAndPath(g) => {

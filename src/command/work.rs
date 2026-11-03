@@ -148,10 +148,15 @@ fn mine(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
     here(game)?;
     let quantity = args.try_int().unwrap_or(0);
     args.require_min(1)?;
-    let (names, label) = blocks(b, game, args)?;
+    let mut boms = Vec::new();
+    for word in args.rest() {
+        boms.push(super::baritone_command::block_optional_meta(b, game, &word)?);
+    }
+    while args.optional_string().is_some() {}
     begin(b, game)?;
-    b.core.say(game, &format!("Mining {label}"));
-    b.procs.mine.mine(quantity.max(0) as usize, names, label);
+    b.core.say(game, &format!("Mining [{}]", boms.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")));
+    let Baritone { core, procs, .. } = b;
+    procs.mine.mine(core, game, quantity, Some(super::baritone_bom::BlockOptionalMetaLookup::new(boms)));
     Ok(())
 }
 
@@ -293,8 +298,8 @@ fn blacklist(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandR
     if !b.procs.get_to_block.running() {
         return Err(CommandError::new("GetToBlockProcess is not currently active"));
     }
-    let at = feet(game)?;
-    if b.procs.get_to_block.blacklist_closest(at) {
+    let Baritone { core, procs, .. } = b;
+    if procs.get_to_block.blacklist_closest(core, game) {
         b.core.say(game, "Blacklisted closest instances");
         Ok(())
     } else {

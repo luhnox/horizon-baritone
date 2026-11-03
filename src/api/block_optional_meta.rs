@@ -25,7 +25,7 @@ impl BlockOptionalMeta {
     }
 
     /// `new BlockOptionalMeta(String)`: `id`, `id[]` or `id[properties]`, the id already resolved to a block name.
-    pub fn parse(selector: &str, resolve_block: &dyn Fn(&str) -> Option<String>) -> Result<Self, String> {
+    pub fn parse(selector: &str, resolve_block: &mut dyn FnMut(&str) -> Option<String>) -> Result<Self, String> {
         let (id, props) = match selector.find('[') {
             Some(i) if selector.ends_with(']') => (&selector[..i], Some(&selector[i + 1..selector.len() - 1])),
             _ => (selector, None),
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn a_block_with_properties_matches_only_those_states() {
-        let bom = BlockOptionalMeta::parse("oak_stairs[facing=north]", &resolve).unwrap();
+        let bom = BlockOptionalMeta::parse("oak_stairs[facing=north]", &mut resolve).unwrap();
         assert!(bom.matches(&state("oak_stairs", "facing=north,half=top")));
         assert!(!bom.matches(&state("oak_stairs", "facing=south")));
         assert!(!bom.matches(&state("stone", "facing=north")));
@@ -153,8 +153,8 @@ mod tests {
 
     #[test]
     fn a_plain_block_prints_empty_properties_and_a_lookup_prints_them_all() {
-        let a = BlockOptionalMeta::parse("dirt", &resolve).unwrap();
-        let b = BlockOptionalMeta::parse("stone[]", &resolve).unwrap();
+        let a = BlockOptionalMeta::parse("dirt", &mut resolve).unwrap();
+        let b = BlockOptionalMeta::parse("stone[]", &mut resolve).unwrap();
         assert!(a.matches(&state("dirt", "")));
         let lookup = BlockOptionalMetaLookup::new(vec![a, b]);
         assert_eq!(
@@ -167,8 +167,8 @@ mod tests {
 
     #[test]
     fn a_bad_pair_is_refused_and_drops_decide_items() {
-        assert!(BlockOptionalMeta::parse("stone[a]", &resolve).is_err());
-        assert!(BlockOptionalMeta::parse("stone[a=b=c]", &resolve).is_err());
+        assert!(BlockOptionalMeta::parse("stone[a]", &mut resolve).is_err());
+        assert!(BlockOptionalMeta::parse("stone[a=b=c]", &mut resolve).is_err());
         let mut bom = BlockOptionalMeta::of_block("minecraft:stone");
         bom.set_drops(["minecraft:cobblestone".to_owned()].into_iter().collect());
         assert!(BlockOptionalMetaLookup::new(vec![bom]).has_item("minecraft:cobblestone"));

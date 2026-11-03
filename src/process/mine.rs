@@ -1,61 +1,42 @@
-// baritone.process.MineProcess: keep a list of the places the wanted blocks are, head for the nearest as
-// a GoalThreeBlocks (into the block, under it, or two under it), break what is above the head from
-// there, and when none is known dig away at legitMineYLevel from where the mining began. With legitMine
-// only blocks a player could see are added, from a cube of radius 10 around the player.
-// Where this differs from the Java: a quantity counts the inventory's items of what the blocks drop,
-// from a table of the common ores instead of loot tables; and the drop of a broken block is found by
-// scanning the ground, not by remembering where it fell.
+// baritone.process.MineProcess, written from the Java: a list of the places the wanted blocks are, kept
+// pruned and sorted by distance; a goal made of one GoalThreeBlocks, GoalTwoBlocks or GoalBlock per place; a
+// shaft mined from where the player stands when the ore is straight above; and, when none is known, a walk away
+// from where the mining began (exploreForBlocks) or a scan of what a player could see (legitMine).
+// The Java scans on another thread; here the scan runs in the tick, every mineGoalUpdateInterval ticks.
 use super::baritone::Core;
+use super::baritone_bom::BlockOptionalMetaLookup;
+use super::baritone_calculation_context::{CalculationContext, CostHooks};
+use super::baritone_costs::COST_INF;
 use super::baritone_goals::{rc, Goal, GoalBlock, GoalComposite, GoalRef, GoalRunAway, GoalThreeBlocks, GoalTwoBlocks};
-use super::baritone_gworld::{bare, block_name, count_items, dropped_items, exposed, loaded, GameTerrain};
+use super::baritone_gworld::dropped_items;
+use super::baritone_movement_helper as mh;
+use super::baritone_movement_state::Input;
 use super::baritone_pathing::{PathingCommand, Process};
+use super::baritone_scanner::{lookup_state_ids, scan_chunk_radius};
 use super::baritone_utils::{dist_sq, Pos};
 use super::Game;
-use std::collections::HashSet;
+use std::collections::HashMap;
+use std::rc::Rc;
 
-pub struct MineProcess {
-    names: HashSet<String>,
-    label: String,
-    /// What the blocks drop, for counting a quantity.
-    drops: HashSet<String>,
-    desired: usize,
-    active: bool,
-    known: Vec<Pos>,
-    items: Vec<Pos>,
-    blacklist: HashSet<Pos>,
-    branch_point: Option<Pos>,
-    next_scan: u64,
-    last_break: Option<Pos>,
-    loiter_until: u64,
-}
+/// `CachedChunk.BLOCKS_TO_KEEP_TRACK_OF`: the blocks the cached world remembers beyond the loaded chunks.
+pub const BLOCKS_TO_KEEP_TRACK_OF: &[&str] = &[
+    "ender_chest", "furnace", "chest", "trapped_chest", "end_portal", "end_portal_frame", "spawner", "barrier", "observer",
+    "white_shulker_box", "orange_shulker_box", "magenta_shulker_box", "light_blue_shulker_box", "yellow_shulker_box",
+    "lime_shulker_box", "pink_shulker_box", "gray_shulker_box", "light_gray_shulker_box", "cyan_shulker_box",
+    "purple_shulker_box", "blue_shulker_box", "brown_shulker_box", "green_shulker_box", "red_shulker_box",
+    "black_shulker_box", "nether_portal", "hopper", "beacon", "brewing_stand", "creeper_head", "creeper_wall_head",
+    "dragon_head", "dragon_wall_head", "player_head", "player_wall_head", "zombie_head", "zombie_wall_head",
+    "skeleton_skull", "skeleton_wall_skull", "wither_skeleton_skull", "wither_skeleton_wall_skull", "enchanting_table",
+    "anvil", "white_bed", "orange_bed", "magenta_bed", "light_blue_bed", "yellow_bed", "lime_bed", "pink_bed", "gray_bed",
+    "light_gray_bed", "cyan_bed", "purple_bed", "blue_bed", "brown_bed", "green_bed", "red_bed", "black_bed", "dragon_egg",
+    "jukebox", "end_gateway", "cobweb", "nether_wart", "ladder", "vine",
+];
 
-/// The item a block gives when it is broken with a good pickaxe.
-fn drop_of(block: &str) -> String {
-    let b = bare(block);
-    let b = b.strip_prefix("deepslate_").filter(|r| r.ends_with("_ore")).unwrap_or(b);
-    match b {
-        "iron_ore" => "raw_iron",
-        "gold_ore" => "raw_gold",
-        "copper_ore" => "raw_copper",
-        "diamond_ore" => "diamond",
-        "coal_ore" => "coal",
-        "emerald_ore" => "emerald",
-        "lapis_ore" => "lapis_lazuli",
-        "redstone_ore" => "redstone",
-        "nether_quartz_ore" => "quartz",
-        "nether_gold_ore" => "gold_nugget",
-        "stone" => "cobblestone",
-        "deepslate" => "cobbled_deepslate",
-        "grass_block" | "podzol" | "mycelium" | "dirt_path" | "farmland" | "rooted_dirt" => "dirt",
-        other => other,
-    }
-    .to_owned()
-}
+/// Walks away from a point for ever: no position is ever the goal, so the path always goes on. (The anonymous
+/// GoalRunAway subclass of MineProcess and GetToBlockProcess.)
+pub struct Endless(pub GoalRunAway);
 
-/// Walks away from a point forever: no position is ever the goal, so the path always goes on.
-struct Branch(GoalRunAway);
-
-impl Goal for Branch {
+impl Goal for Endless {
     fn is_in_goal(&self, _p: Pos) -> bool {
         false
     }
@@ -70,108 +51,343 @@ impl Goal for Branch {
     }
 }
 
+pub struct MineProcess {
+    filter: Option<BlockOptionalMetaLookup>,
+    known_ore_locations: Vec<Pos>,
+    /// Inaccessible.
+    blacklist: Vec<Pos>,
+    /// Where a broken block's drop is expected to be, until when (ms).
+    anticipated_drops: HashMap<Pos, u64>,
+    branch_point: Option<Pos>,
+    branch_point_runaway: Option<GoalRef>,
+    desired_quantity: i32,
+    tick_count: i32,
+}
+
 impl MineProcess {
     pub fn new() -> Self {
         Self {
-            names: HashSet::new(),
-            label: String::new(),
-            drops: HashSet::new(),
-            desired: 0,
-            active: false,
-            known: Vec::new(),
-            items: Vec::new(),
-            blacklist: HashSet::new(),
+            filter: None,
+            known_ore_locations: Vec::new(),
+            blacklist: Vec::new(),
+            anticipated_drops: HashMap::new(),
             branch_point: None,
-            next_scan: 0,
-            last_break: None,
-            loiter_until: 0,
+            branch_point_runaway: None,
+            desired_quantity: 0,
+            tick_count: 0,
         }
     }
 
-    pub fn mine(&mut self, quantity: usize, names: HashSet<String>, label: String) {
-        *self = Self::new();
-        self.drops = names.iter().map(|n| format!("minecraft:{}", drop_of(n))).collect();
-        self.desired = quantity;
-        self.names = names;
-        self.label = label;
-        self.active = true;
+    /// `mine(quantity, filter)`.
+    pub fn mine(&mut self, core: &mut Core, game: &mut Game<'_>, quantity: i32, filter: Option<BlockOptionalMetaLookup>) {
+        self.filter = filter;
+        if self.filter_filter(core, game).is_none() {
+            self.filter = None;
+        }
+        self.desired_quantity = quantity;
+        self.known_ore_locations = Vec::new();
+        self.blacklist = Vec::new();
+        self.branch_point = None;
+        self.branch_point_runaway = None;
+        self.anticipated_drops = HashMap::new();
+        if self.filter.is_some() {
+            self.rescan(core, game, Vec::new());
+        }
     }
 
     /// Never mine this block again (#blacklist): the nearest one known.
     pub fn blacklist_nearest(&mut self, from: Pos) -> Option<Pos> {
-        let p = self.known.iter().copied().min_by_key(|t| dist_sq(*t, from))?;
-        self.blacklist.insert(p);
-        self.known.retain(|t| *t != p);
+        let p = self.known_ore_locations.iter().copied().min_by_key(|t| dist_sq(*t, from))?;
+        self.blacklist.push(p);
+        self.known_ore_locations.retain(|t| *t != p);
         Some(p)
-    }
-
-    pub fn mined(&self) -> usize {
-        0
     }
 
     /// The ore it is after, nearest first, for drawing.
     pub fn targets(&self) -> &[Pos] {
-        &self.known
+        &self.known_ore_locations
     }
 
-    fn plausible(core: &Core, game: &Game<'_>, p: Pos) -> bool {
-        let name = block_name(game, p);
-        let facts = game.res.facts().get(game.world.block(p[0], p[1], p[2]));
-        facts.hardness >= 0.0 && !core.avoid_breaking.iter().any(|a| a == bare(&name))
+    pub fn filter(&self) -> Option<&BlockOptionalMetaLookup> {
+        self.filter.as_ref()
     }
 
-    /// MineProcess.prune: forget what is gone, implausible, out of the height limits or blacklisted,
-    /// and keep the nearest few.
-    fn prune(&mut self, core: &mut Core, game: &mut Game<'_>, feet: Pos) {
-        let (lo, hi) = (core.settings.int("minYLevelWhileMining"), core.settings.int("maxYLevelWhileMining"));
-        let exposed_only = core.settings.flag("allowOnlyExposedOres");
-        let max = core.settings.int("mineMaxOreLocationsCount").clamp(1, 512) as usize;
-        let mut seen = HashSet::new();
-        let mut keep: Vec<Pos> = Vec::new();
-        for p in std::mem::take(&mut self.known) {
-            if !seen.insert(p) || self.blacklist.contains(&p) || p[1] < lo || p[1] > hi {
-                continue;
+    /// `filterFilter`: the filter, minus what allowBreak forbids.
+    fn filter_filter(&self, core: &mut Core, game: &mut Game<'_>) -> Option<BlockOptionalMetaLookup> {
+        let filter = self.filter.as_ref()?;
+        if !core.settings.flag("allowBreak") {
+            let anyway = core.settings.list("allowBreakAnyway");
+            let kept: Vec<_> = filter.blocks().iter().filter(|b| anyway.iter().any(|a| *a == b.block().trim_start_matches("minecraft:"))).cloned().collect();
+            if kept.is_empty() {
+                core.say(game, "Unable to mine when allowBreak is false and target block is not in allowBreakAnyway!");
+                return None;
             }
-            if loaded(game, p) && (!self.names.contains(&block_name(game, p)) || !Self::plausible(core, game, p)) {
-                continue;
-            }
-            keep.push(p);
+            return Some(BlockOptionalMetaLookup::new(kept));
         }
-        if exposed_only {
-            let g = &*game;
-            let mut terrain = GameTerrain::new(g, &mut core.cells, &core.avoid_breaking, true);
-            keep.retain(|p| exposed(&mut terrain, *p, false));
-        }
-        keep.sort_by_key(|p| dist_sq(*p, feet));
-        keep.truncate(max);
-        self.known = keep;
+        Some(filter.clone())
     }
 
-    /// MineProcess.addNearby: what a player standing here could see, in a cube of radius 10.
-    fn add_nearby(&mut self, core: &mut Core, game: &mut Game<'_>, feet: Pos) {
-        let diagonals = core.settings.flag("legitMineIncludeDiagonals");
-        let found = core.cache.locations_of(game, &self.names, feet, 10, Some((feet[1] - 10, feet[1] + 10)), 200);
-        let g = &*game;
-        let mut terrain = GameTerrain::new(g, &mut core.cells, &core.avoid_breaking, true);
-        for p in found {
-            if !self.known.contains(&p) && exposed(&mut terrain, p, diagonals) {
-                self.known.push(p);
+    fn rescan(&mut self, core: &mut Core, game: &mut Game<'_>, already: Vec<Pos>) {
+        let Some(filter) = self.filter_filter(core, game) else { return };
+        if core.settings.flag("legitMine") {
+            return;
+        }
+        let mut dropped = self.dropped_items_scan(core, game);
+        let max = core.settings.int("mineMaxOreLocationsCount").max(0) as usize;
+        let mut locs = search_world(core, game, &filter, max, &already, &self.blacklist, &mut dropped, None);
+        locs.extend(dropped);
+        if locs.is_empty() && !core.settings.flag("exploreForBlocks") {
+            core.say(game, &format!("No locations for {filter} known, cancelling"));
+            self.cancel_now(core, game);
+            return;
+        }
+        self.known_ore_locations = locs;
+    }
+
+    /// `cancel()` → onLostControl.
+    fn cancel_now(&mut self, core: &mut Core, game: &mut Game<'_>) {
+        self.mine(core, game, 0, None);
+    }
+
+    /// `droppedItemsScan`.
+    fn dropped_items_scan(&self, core: &Core, game: &Game<'_>) -> Vec<Pos> {
+        if !core.settings.flag("mineScanDroppedItems") {
+            return Vec::new();
+        }
+        let Some(filter) = &self.filter else { return Vec::new() };
+        let mut ret: Vec<Pos> = dropped_items(game)
+            .into_iter()
+            .filter(|(_, item)| filter.has_item(item))
+            .map(|(p, _)| [p[0].floor() as i32, p[1].floor() as i32, p[2].floor() as i32])
+            .collect();
+        ret.extend(self.anticipated_drops.keys().copied());
+        ret
+    }
+
+    /// `updateLoucaSystem`: the block being broken is where a drop will land.
+    fn update_louca_system(&mut self, core: &mut Core, game: &mut Game<'_>) {
+        let now = super::baritone_command::now_ms();
+        let selected = core.drive(game, |_, ctx, _| super::baritone_player_context::PlayerContext::selected_block(ctx));
+        if let Some(pos) = selected {
+            if self.known_ore_locations.contains(&pos) {
+                self.anticipated_drops.insert(pos, now + core.settings.int("mineDropLoiterDurationMSThanksLouca").max(0) as u64);
+            }
+        }
+        self.anticipated_drops.retain(|_, until| *until >= now);
+    }
+
+    /// `addNearby` (legitMine): what a player standing here could see, in a cube of radius 10.
+    fn add_nearby(&mut self, core: &mut Core, game: &mut Game<'_>) -> bool {
+        let dropped = self.dropped_items_scan(core, game);
+        self.known_ore_locations.extend(dropped.iter().copied());
+        let Some(filter) = self.filter_filter(core, game) else { return false };
+        let search_dist = 10;
+        let faked_block_reach_distance = 20.0;
+        let include_diagonals = core.settings.flag("legitMineIncludeDiagonals");
+        let already: std::collections::HashSet<Pos> = self.known_ore_locations.iter().copied().collect();
+        let known_snapshot = self.known_ore_locations.clone();
+        let mut added: Vec<Pos> = Vec::new();
+        core.drive(game, |_, ctx, _| {
+            let feet = super::baritone_player_context::PlayerContext::player_feet(ctx);
+            for x in feet[0] - search_dist..=feet[0] + search_dist {
+                for y in feet[1] - search_dist..=feet[1] + search_dist {
+                    for z in feet[2] - search_dist..=feet[2] + search_dist {
+                        // Crucial to only add blocks we can see because otherwise this is an x-ray and it'll get caught.
+                        let state = super::baritone_block_state_interface::BlockStateInterface::get0(ctx, x, y, z);
+                        if !filter.has(&state) || already.contains(&[x, y, z]) {
+                            continue;
+                        }
+                        let pos = [x, y, z];
+                        let near_known = include_diagonals && known_snapshot.iter().any(|ore| dist_sq(*ore, pos) <= 2);
+                        if near_known || super::baritone_player_context::PlayerContext::reachable(ctx, pos, faked_block_reach_distance, false).is_some() {
+                            added.push(pos);
+                        }
+                    }
+                }
+            }
+        });
+        self.known_ore_locations.extend(added);
+        let mut dropped = dropped;
+        let max = core.settings.int("mineMaxOreLocationsCount").max(0) as usize;
+        let known = std::mem::take(&mut self.known_ore_locations);
+        self.known_ore_locations = prune(core, game, known, &filter, max, &self.blacklist, &mut dropped, None);
+        true
+    }
+
+    /// `coalesce`: the goal that gets the player to breaking `loc`.
+    fn coalesce(&self, core: &mut Core, game: &mut Game<'_>, loc: Pos, locs: &[Pos], filter: &BlockOptionalMetaLookup) -> GoalRef {
+        let above = [loc[0], loc[1] + 1, loc[2]];
+        let assume_vertical_shaft_mine = core.drive(game, |_, ctx, _| !super::baritone_block_state_interface::BlockStateInterface::get0(ctx, above[0], above[1], above[2]).is(super::baritone_block_state::Class::Falling));
+        if !core.settings.flag("forceInternalMining") {
+            return if assume_vertical_shaft_mine {
+                // We can get directly below the block.
+                rc(GoalThreeBlocks(loc))
+            } else {
+                // We need to get feet or head into the block.
+                rc(GoalTwoBlocks(loc))
+            };
+        }
+        let internal = |core: &mut Core, game: &mut Game<'_>, pos: Pos| self.internal_mining_goal(core, game, pos, locs, filter);
+        let upward_goal = internal(core, game, [loc[0], loc[1] + 1, loc[2]]);
+        let downward_goal = internal(core, game, [loc[0], loc[1] - 1, loc[2]]);
+        let double_downward_goal = internal(core, game, [loc[0], loc[1] - 2, loc[2]]);
+        if upward_goal == downward_goal {
+            // Symmetric.
+            if double_downward_goal && assume_vertical_shaft_mine {
+                // We have a checkerboard like pattern: this one, and the one two below it. Therefore it's fine to path
+                // to immediately below this one, since your feet will be in the doubleDownwardGoal, but only if
+                // assumeVerticalShaftMine.
+                return rc(GoalThreeBlocks(loc));
+            }
+            // This block has nothing interesting two below, but is symmetric vertically so we can get either feet or
+            // head into it.
+            return rc(GoalTwoBlocks(loc));
+        }
+        if upward_goal {
+            // downwardGoal known to be false. Ignore the gap then potential doubleDownward, because we want to path
+            // feet into this one and head into upwardGoal.
+            return rc(GoalBlock(loc));
+        }
+        // upwardGoal known to be false, downwardGoal known to be true.
+        if double_downward_goal && assume_vertical_shaft_mine {
+            // This block and two below it are goals. Path into the center of the one below, because that includes
+            // directly below this one.
+            return rc(GoalTwoBlocks([loc[0], loc[1] - 1, loc[2]]));
+        }
+        // upwardGoal false, downwardGoal true, doubleDownwardGoal false: just this block and the one immediately
+        // below, no others.
+        rc(GoalBlock([loc[0], loc[1] - 1, loc[2]]))
+    }
+
+    fn internal_mining_goal(&self, core: &mut Core, game: &mut Game<'_>, pos: Pos, locs: &[Pos], filter: &BlockOptionalMetaLookup) -> bool {
+        // Here, BlockStateInterface is used because the position may be in a cached chunk (the targeted block is one
+        // that is kept track of).
+        if locs.contains(&pos) {
+            return true;
+        }
+        let air_exception = core.settings.flag("internalMiningAirException");
+        core.with_calc(game, |calc, _, _| {
+            let state = calc.bsi.get0(pos[0], pos[1], pos[2]);
+            if air_exception && state.is_air() {
+                return true;
+            }
+            filter.has(&state) && plausible_to_break(calc, pos)
+        })
+    }
+
+    /// `updateGoal`.
+    fn update_goal(&mut self, core: &mut Core, game: &mut Game<'_>) -> Option<PathingCommand> {
+        let filter = self.filter_filter(core, game)?;
+        let legit = core.settings.flag("legitMine");
+        if !self.known_ore_locations.is_empty() {
+            let max = core.settings.int("mineMaxOreLocationsCount").max(0) as usize;
+            let mut dropped = self.dropped_items_scan(core, game);
+            let locs = self.known_ore_locations.clone();
+            let locs2 = prune(core, game, locs, &filter, max, &self.blacklist, &mut dropped, None);
+            let goals: Vec<GoalRef> = locs2.iter().map(|loc| self.coalesce(core, game, *loc, &locs2, &filter)).collect();
+            let goal = rc(GoalComposite(goals));
+            self.known_ore_locations = locs2;
+            return Some(if legit { PathingCommand::ForceRevalidateGoalAndPath(goal) } else { PathingCommand::RevalidateGoalAndPath(goal) });
+        }
+        // We don't know any ore locations at the moment.
+        if !legit && !core.settings.flag("exploreForBlocks") {
+            return None;
+        }
+        // Only when we should explore for blocks or are in legit mode we do this.
+        let y = core.settings.int("legitMineYLevel") as i32;
+        if self.branch_point.is_none() {
+            self.branch_point = core.player_feet(game);
+        }
+        // TODO shaft mode, mine 1x1 shafts to either side.
+        if self.branch_point_runaway.is_none() {
+            let from = self.branch_point?;
+            self.branch_point_runaway = Some(rc(Endless(GoalRunAway { from: vec![from], distance: 1, maintain_y: Some(y) })));
+        }
+        Some(PathingCommand::RevalidateGoalAndPath(self.branch_point_runaway.clone()?))
+    }
+}
+
+/// `MineProcess.plausibleToBreak`.
+pub fn plausible_to_break(ctx: &CalculationContext, pos: Pos) -> bool {
+    let state = ctx.bsi.get0(pos[0], pos[1], pos[2]);
+    if mh::get_mining_duration_ticks(ctx, pos[0], pos[1], pos[2], &state, true) >= COST_INF {
+        return false;
+    }
+    if mh::avoid_breaking(ctx, pos[0], pos[1], pos[2], &state) {
+        return false;
+    }
+    // Bedrock above and below makes it implausible, otherwise we're good.
+    !(ctx.bsi.get0(pos[0], pos[1] + 1, pos[2]).is_block("bedrock") && ctx.bsi.get0(pos[0], pos[1] - 1, pos[2]).is_block("bedrock"))
+}
+
+/// `MineProcess.isNextToAir`.
+pub fn is_next_to_air(ctx: &CalculationContext, pos: Pos, radius: i32) -> bool {
+    for dx in -radius..=radius {
+        for dy in -radius..=radius {
+            for dz in -radius..=radius {
+                if dx.abs() + dy.abs() + dz.abs() <= radius && mh::is_transparent(&ctx.bsi.get0(pos[0] + dx, pos[1] + dy, pos[2] + dz)) {
+                    return true;
+                }
             }
         }
     }
+    false
+}
 
-    /// MineProcess.coalesce: the goal that gets the player to breaking `p`.
-    fn coalesce(core: &Core, game: &Game<'_>, p: Pos) -> GoalRef {
-        let above = [p[0], p[1] + 1, p[2]];
-        let falling = matches!(bare(&block_name(game, above)), "sand" | "red_sand" | "gravel" | "anvil" | "chipped_anvil" | "damaged_anvil" | "dragon_egg");
-        if core.settings.flag("forceInternalMining") {
-            if falling { rc(GoalTwoBlocks(p)) } else { rc(GoalThreeBlocks(p)) }
-        } else if falling {
-            rc(GoalTwoBlocks([p[0], p[1] - 1, p[2]]))
+/// `MineProcess.prune`: forget what is gone, implausible, out of the height limits or blacklisted, and keep the
+/// nearest `max`. A drop already next to a known block of the filter is not a place of its own.
+pub fn prune(core: &mut Core, game: &mut Game<'_>, locs2: Vec<Pos>, filter: &BlockOptionalMetaLookup, max: usize, blacklist: &[Pos], dropped: &mut Vec<Pos>, hooks: Option<Rc<dyn CostHooks>>) -> Vec<Pos> {
+    let exposed_only = core.settings.flag("allowOnlyExposedOres");
+    let exposed_distance = core.settings.int("allowOnlyExposedOresDistance") as i32;
+    let min_y = core.settings.int("minYLevelWhileMining") as i32;
+    let max_y = core.settings.int("maxYLevelWhileMining") as i32;
+    let feet = core.player_feet(game).unwrap_or([0, 0, 0]);
+    core.with_calc_hooks(game, hooks, |ctx, _, _| {
+        dropped.retain(|drop| {
+            !locs2.iter().any(|pos| dist_sq(*pos, *drop) <= 9 && filter.has(&ctx.get(pos[0], pos[1], pos[2])) && plausible_to_break(ctx, *pos))
+        });
+        let mut seen = std::collections::HashSet::new();
+        let mut locs: Vec<Pos> = locs2
+            .into_iter()
+            .filter(|pos| seen.insert(*pos))
+            // Remove any that are within loaded chunks that aren't actually what we want.
+            .filter(|pos| !ctx.bsi.world_contains_loaded_chunk(pos[0], pos[2]) || filter.has(&ctx.get(pos[0], pos[1], pos[2])) || dropped.contains(pos))
+            // Remove any that are implausible to mine (encased in bedrock, or touching lava).
+            .filter(|pos| plausible_to_break(ctx, *pos))
+            .filter(|pos| !exposed_only || is_next_to_air(ctx, *pos, exposed_distance))
+            .filter(|pos| pos[1] >= min_y + ctx.bsi.min_y())
+            .filter(|pos| pos[1] <= max_y)
+            .filter(|pos| !blacklist.contains(pos))
+            .collect();
+        locs.sort_by_key(|p| dist_sq(*p, feet));
+        locs.truncate(max);
+        locs
+    })
+}
+
+/// `MineProcess.searchWorld`: the places the wanted blocks are, from the cache for the blocks it keeps track of
+/// and from a scan of the loaded chunks for the rest, pruned.
+pub fn search_world(core: &mut Core, game: &mut Game<'_>, filter: &BlockOptionalMetaLookup, max: usize, already_known: &[Pos], blacklist: &[Pos], dropped: &mut Vec<Pos>, hooks: Option<Rc<dyn CostHooks>>) -> Vec<Pos> {
+    let feet = core.player_feet(game).unwrap_or([0, 0, 0]);
+    let mut locs: Vec<Pos> = Vec::new();
+    let mut untracked = false;
+    for bom in filter.blocks() {
+        let bare = bom.block().trim_start_matches("minecraft:");
+        if BLOCKS_TO_KEEP_TRACK_OF.contains(&bare) {
+            let names = std::iter::once(bom.block().to_owned()).collect();
+            let cap = core.settings.int("maxCachedWorldScanCount").max(0) as usize;
+            locs.extend(core.cache.locations_of(game, &names, feet, 512, None, cap));
         } else {
-            rc(GoalTwoBlocks(p))
+            untracked = true;
         }
     }
+    locs = prune(core, game, locs, filter, max, blacklist, dropped, hooks.clone());
+    if untracked || (core.settings.flag("extendCacheOnThreshold") && locs.len() < max) {
+        let ids = lookup_state_ids(game, filter);
+        locs.extend(scan_chunk_radius(game, &ids, feet, max, 32)); // maxSearchRadius is NOT sq
+    }
+    locs.extend(already_known.iter().copied());
+    prune(core, game, locs, filter, max, blacklist, dropped, hooks)
 }
 
 impl Process for MineProcess {
@@ -180,121 +396,122 @@ impl Process for MineProcess {
     }
 
     fn display(&self) -> String {
-        format!("Mine {}", self.label)
+        format!("Mine {}", self.filter.as_ref().map_or("null".to_owned(), ToString::to_string))
     }
 
     fn is_active(&self) -> bool {
-        self.active
+        self.filter.is_some()
     }
 
     fn priority(&self) -> f64 {
         0.5
     }
 
-    fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, calc_failed: bool, _safe: bool) -> PathingCommand {
-        let tick = game.ticks;
-        let Some(feet) = core.player_feet(game) else {
-            return PathingCommand::Defer;
-        };
-        let broken = std::mem::take(&mut core.dig.broken);
-        for (pos, name) in broken {
-            if self.names.contains(&name) {
-                self.last_break = Some(pos);
-                let ms = core.settings.int("mineDropLoiterDurationMSThanksLouca").max(0) as u64;
-                self.loiter_until = tick + ms / 50 + 1;
-                self.known.retain(|t| *t != pos);
+    fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, calc_failed: bool, is_safe_to_cancel: bool) -> PathingCommand {
+        let Some(filter) = self.filter.clone() else { return PathingCommand::Defer };
+        if self.desired_quantity > 0 {
+            let curr: i32 = game.inventory.iter().take(36).flatten().filter(|s| filter.has_item(&s.item)).map(|s| s.count as i32).sum();
+            if curr >= self.desired_quantity {
+                core.say(game, &format!("Have {curr} valid items"));
+                self.cancel_now(core, game);
+                return PathingCommand::Defer;
             }
         }
-        if self.desired > 0 {
-            let have = count_items(game, |n| self.drops.contains(n)) as usize;
-            if have >= self.desired {
-                core.say(game, &format!("Have {have} valid items"));
-                self.active = false;
-                return PathingCommand::CancelAndSetGoal(rc(GoalBlock(feet)));
-            }
-        }
+        let feet = core.player_feet(game).unwrap_or([0, 0, 0]);
         if calc_failed {
-            if !self.known.is_empty() && core.settings.flag("blacklistClosestOnFailure") {
-                core.say(game, &format!("Unable to find any path to {}, blacklisting presumably unreachable closest instance...", self.label));
-                if let Some(p) = self.known.iter().copied().min_by_key(|t| dist_sq(*t, feet)) {
-                    self.blacklist.insert(p);
+            if !self.known_ore_locations.is_empty() && core.settings.flag("blacklistClosestOnFailure") {
+                core.say(game, &format!("Unable to find any path to {filter}, blacklisting presumably unreachable closest instance..."));
+                if let Some(p) = self.known_ore_locations.iter().copied().min_by_key(|t| dist_sq(*t, feet)) {
+                    self.blacklist.push(p);
                 }
-                let gone: Vec<Pos> = self.blacklist.iter().copied().collect();
-                self.known.retain(|k| !gone.contains(k));
+                let blacklist = self.blacklist.clone();
+                self.known_ore_locations.retain(|p| !blacklist.contains(p));
             } else {
-                core.say(game, &format!("Unable to find any path to {}, canceling mine", self.label));
-                self.active = false;
-                return PathingCommand::CancelAndSetGoal(rc(GoalBlock(feet)));
+                core.say(game, &format!("Unable to find any path to {filter}, canceling mine"));
+                self.cancel_now(core, game);
+                return PathingCommand::Defer;
             }
         }
 
+        self.update_louca_system(core, game);
+        let interval = core.settings.int("mineGoalUpdateInterval") as i32;
+        let curr = self.known_ore_locations.clone();
         let legit = core.settings.flag("legitMine");
-        let interval = core.settings.int("mineGoalUpdateInterval").max(1) as u64;
-        if !legit && (tick >= self.next_scan || self.known.is_empty()) {
-            self.next_scan = tick + interval;
-            let mut found = core.cache.locations_of(game, &self.names, feet, 64, None, 200);
-            found.retain(|p| !self.blacklist.contains(p));
-            self.known = found;
-            self.prune(core, game, feet);
-            if self.known.is_empty() && !core.settings.flag("exploreForBlocks") {
-                core.say(game, &format!("No locations for {} known, cancelling", self.label));
-                self.active = false;
-                return PathingCommand::CancelAndSetGoal(rc(GoalBlock(feet)));
+        // rescan does nothing in legit mode.
+        let due = interval != 0 && {
+            let due = self.tick_count % interval == 0;
+            self.tick_count += 1;
+            due
+        };
+        if due && !legit {
+            self.rescan(core, game, curr.clone());
+            if self.filter.is_none() {
+                return PathingCommand::Defer;
             }
         }
-        if legit {
-            self.add_nearby(core, game, feet);
-            self.prune(core, game, feet);
+        if legit && !self.add_nearby(core, game) {
+            self.cancel_now(core, game);
+            return PathingCommand::Defer;
         }
-
-        // What the broken block dropped, for a moment after.
-        self.items.clear();
-        if core.settings.flag("mineScanDroppedItems") && tick < self.loiter_until {
-            if let Some(near) = self.last_break {
-                self.items = dropped_items(game)
-                    .into_iter()
-                    .filter(|(_, n)| self.drops.contains(n.as_str()))
-                    .map(|(p, _)| [p[0].floor() as i32, p[1].floor() as i32, p[2].floor() as i32])
-                    .filter(|p| dist_sq(*p, near) <= 100)
-                    .collect();
-            }
-        }
-
-        // Shaft mining: an ore known in this column, level with the head or above it, is broken from here.
-        if !core.user_paused && core.dig.active.is_none() && game.player.as_ref().is_some_and(|p| p.ground.on_ground) {
-            let shaft = self
-                .known
-                .iter()
-                .copied()
-                .filter(|p| p[0] == feet[0] && p[2] == feet[2] && p[1] > feet[1])
-                .filter(|p| loaded(game, *p) && self.names.contains(&block_name(game, *p)))
-                .min_by_key(|p| dist_sq(*p, feet));
-            if let Some(p) = shaft {
-                if core.start_dig(game, p) {
-                    return PathingCommand::RequestPause;
+        let on_ground = game.player.as_ref().is_some_and(|p| p.ground.on_ground);
+        let shaft = curr
+            .iter()
+            .copied()
+            .filter(|p| p[0] == feet[0] && p[2] == feet[2])
+            .filter(|p| p[1] >= feet[1])
+            // After breaking a block, it takes mineGoalUpdateInterval ticks for it to actually update this list.
+            .filter(|p| !core.with_calc(game, |calc, _, _| calc.bsi.get0(p[0], p[1], p[2]).is_air()))
+            .min_by_key(|p| dist_sq(*p, [feet[0], feet[1] + 1, feet[2]]));
+        core.input.clear_all_keys();
+        if let Some(pos) = shaft {
+            if on_ground {
+                let state_avoid = core.with_calc(game, |calc, _, _| {
+                    let state = calc.bsi.get0(pos[0], pos[1], pos[2]);
+                    mh::avoid_breaking(calc, pos[0], pos[1], pos[2], &state)
+                });
+                if !state_avoid {
+                    let rot = core.drive(game, |_, ctx, _| {
+                        use super::baritone_player_context::PlayerContext as P;
+                        P::reachable(ctx, pos, P::block_reach_distance(ctx), false)
+                    });
+                    if let (Some(rot), true) = (rot, is_safe_to_cancel) {
+                        let mut looking = false;
+                        core.drive(game, |_, ctx, _| {
+                            use super::baritone_player_context::PlayerContext as P;
+                            P::update_look_target(ctx, rot, true);
+                            P::switch_to_best_tool_for(ctx, pos);
+                            looking = P::is_looking_at(ctx, pos) || P::player_rotations(ctx).is_really_close_to(rot);
+                        });
+                        if looking {
+                            core.input.set_input_force_state(Input::ClickLeft, true);
+                        }
+                        return PathingCommand::RequestPause;
+                    }
                 }
             }
         }
-
-        // updateGoal
-        if !self.known.is_empty() || !self.items.is_empty() {
-            let mut goals: Vec<GoalRef> = self.known.iter().map(|p| Self::coalesce(core, game, *p)).collect();
-            goals.extend(self.items.iter().map(|p| rc(GoalBlock(*p))));
-            let goal = rc(GoalComposite(goals));
-            return if legit { PathingCommand::ForceRevalidateGoalAndPath(goal) } else { PathingCommand::RevalidateGoalAndPath(goal) };
+        match self.update_goal(core, game) {
+            Some(command) => command,
+            None => {
+                // None in range. Maybe say something in chat? (ahem impact)
+                self.cancel_now(core, game);
+                PathingCommand::Defer
+            }
         }
-        if !legit && !core.settings.flag("exploreForBlocks") {
-            self.active = false;
-            return PathingCommand::CancelAndSetGoal(rc(GoalBlock(feet)));
-        }
-        let from = *self.branch_point.get_or_insert(feet);
-        let goal = rc(Branch(GoalRunAway { from: vec![from], distance: 1, maintain_y: Some(core.settings.int("legitMineYLevel")) }));
-        PathingCommand::RevalidateGoalAndPath(goal)
     }
 
-    fn on_lost_control(&mut self, _core: &mut Core, _game: &mut Game<'_>) {}
+    fn on_lost_control(&mut self, core: &mut Core, game: &mut Game<'_>) {
+        self.mine(core, game, 0, None);
+    }
 
     fn cancel(&mut self) {
-        self.active = false;
+        self.filter = None;
+        self.known_ore_locations.clear();
+        self.blacklist.clear();
+        self.branch_point = None;
+        self.branch_point_runaway = None;
+        self.anticipated_drops.clear();
+        self.desired_quantity = 0;
     }
 }
+

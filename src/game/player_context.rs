@@ -386,8 +386,15 @@ impl PlayerContext for GameCtx<'_, '_> {
         inv::select(&mut self.game.borrow_mut(), slot);
     }
 
-    fn falling_block_near(&self, _pos: Pos) -> bool {
-        false
+    fn falling_block_near(&self, pos: Pos) -> bool {
+        // getEntitiesOfClass(FallingBlockEntity.class, new AABB(0, 0, 0, 1, 1.1, 1).move(pos)) is not empty.
+        let (x, y, z) = (f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]));
+        self.player(|g| {
+            g.falling.iter().any(|f| {
+                let (half, height) = (f64::from(0.98_f32) / 2.0, f64::from(0.98_f32));
+                f.position.x + half > x && f.position.x - half < x + 1.0 && f.position.y + height > y && f.position.y < y + 1.1 && f.position.z + half > z && f.position.z - half < z + 1.0
+            })
+        })
     }
 
     fn mobs_to_avoid(&self) -> Vec<Pos> {

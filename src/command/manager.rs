@@ -211,6 +211,14 @@ pub fn block_word(b: &mut Baritone, game: &Game<'_>, word: &str) -> CommandResul
     b.core.block_named(game, bare).ok_or_else(|| CommandError::new(format!("Expected a valid block, but got \"{word}\".")))
 }
 
+/// One BlockOptionalMeta (ForBlockOptionalMeta): the block, with the properties typed, and what it drops.
+pub fn block_optional_meta(b: &mut Baritone, game: &Game<'_>, word: &str) -> CommandResult<super::baritone_bom::BlockOptionalMeta> {
+    let mut resolve = |id: &str| b.core.block_named(game, id);
+    super::baritone_scanner::make_bom(game, word, &mut resolve).map_err(|e| {
+        if e.starts_with("Invalid block name") { CommandError::new(format!("Expected a valid block, but got \"{word}\".")) } else { CommandError::new(e) }
+    })
+}
+
 /// The rest of the arguments as block names. The set (with variants) and a label for chat.
 pub fn blocks(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult<(HashSet<String>, String)> {
     let words = args.rest();

@@ -679,6 +679,11 @@ impl PathExecutor {
 
     fn on_change_in_path_position(&mut self, e: &ExecEnv) {
         e.ctx.clear_all_keys();
+        if e.settings.flag("chatDebug") && self.path_position < self.path.movements.len() {
+            let m = &self.path.movements[self.path_position];
+            let feet = e.ctx.player_feet();
+            self.debug(format!("[tick {}] movement {}/{}: {:?} {:?} -> {:?}, took {} ticks, feet now {:?}", e.ticks, self.path_position, self.path.movements.len(), m.kind, m.src, m.dest, self.ticks_on_current, feet));
+        }
         self.ticks_on_current = 0;
     }
 
