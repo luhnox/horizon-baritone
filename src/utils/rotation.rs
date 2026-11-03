@@ -92,14 +92,35 @@ pub fn calc_rotation_from_vec3d(orig: [f64; 3], dest: [f64; 3], current: Rotatio
     wrap_angles_to_relative(current, calc_rotation_from_vec3d_raw(orig, dest))
 }
 
+fn sin_table() -> &'static [f32; 65536] {
+    static TABLE: std::sync::OnceLock<Box<[f32; 65536]>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut t = Box::new([0f32; 65536]);
+        for (i, v) in t.iter_mut().enumerate() {
+            *v = (i as f64 * std::f64::consts::PI * 2.0 / 65536.0).sin() as f32;
+        }
+        t
+    })
+}
+
+/// `Mth.sin`: the game's lookup table, not the exact sine.
+pub fn mth_sin(f: f32) -> f32 {
+    sin_table()[((f * 10430.378f32) as i32 & 65535) as usize]
+}
+
+/// `Mth.cos`.
+pub fn mth_cos(f: f32) -> f32 {
+    sin_table()[((f * 10430.378f32 + 16384.0f32) as i32 & 65535) as usize]
+}
+
 /// RotationUtils.calcLookDirectionFromRotation.
 pub fn calc_look_direction_from_rotation(r: Rotation) -> [f64; 3] {
     let pi = std::f32::consts::PI;
     let deg = DEG_TO_RAD as f32;
-    let flat_z = ((-r.yaw * deg) - pi).cos();
-    let flat_x = ((-r.yaw * deg) - pi).sin();
-    let pitch_base = -(-r.pitch * deg).cos();
-    let pitch_height = (-r.pitch * deg).sin();
+    let flat_z = mth_cos((-r.yaw * deg) - pi);
+    let flat_x = mth_sin((-r.yaw * deg) - pi);
+    let pitch_base = -mth_cos(-r.pitch * deg);
+    let pitch_height = mth_sin(-r.pitch * deg);
     [f64::from(flat_x * pitch_base), f64::from(pitch_height), f64::from(flat_z * pitch_base)]
 }
 
