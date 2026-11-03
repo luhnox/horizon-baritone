@@ -272,6 +272,14 @@ pub enum FinderKind {
     BuildLimit,
 }
 
+/// A `GameEnv` over the behaviour's fields, borrowing only those (a method would borrow all of it, and the path manager is
+/// mutated while the env is in use).
+macro_rules! game_env {
+    ($b:expr, $ctx:expr, $snap:expr, $flags:expr, $settings:expr) => {
+        GameEnv::new($ctx, &$b.npf, $snap, $flags, $b.destination, $b.in_nether, $b.min_y, $b.world_max_y, $settings.flag("elytraRenderRaytraces"))
+    };
+}
+
 pub struct ElytraBehavior {
     pub destination: Pos,
     append_destination: bool,
@@ -451,14 +459,10 @@ impl ElytraBehavior {
 
     /// `pathManager.pathToDestination(from)`.
     pub fn path_to_destination_from(&mut self, ctx: &GameCtx<'_, '_>, snap: &PlayerSnapshot, from: Pos, flags: ProcessFlags, settings: &Settings) {
-        let env = self.env(ctx, snap, flags, settings);
+        let env = game_env!(self, ctx, snap, flags, settings);
         let job = self.path_manager.path_to_destination(from, &env);
         drop(env);
         self.start(ctx, snap, job);
-    }
-
-    fn env<'a, 'c, 'g>(&'a self, ctx: &'a GameCtx<'c, 'g>, snap: &'a PlayerSnapshot, flags: ProcessFlags, settings: &Settings) -> GameEnv<'a, 'c, 'g> {
-        GameEnv::new(ctx, &self.npf, snap, flags, self.destination, self.in_nether, self.min_y, self.world_max_y, settings.flag("elytraRenderRaytraces"))
     }
 
     /// The answer of the running search, if it came.
@@ -468,7 +472,7 @@ impl ElytraBehavior {
         let (job, _) = self.running.take().expect("checked above");
         let was_destination = matches!(job.kind(), super::baritone_elytra_path_manager::JobKind::Destination);
         let ok = result.is_ok();
-        let env = self.env(ctx, snap, flags, settings);
+        let env = game_env!(self, ctx, snap, flags, settings);
         let out = self.path_manager.finish(job, result, &env);
         drop(env);
         if let Some(spot) = out.bad_landing_spot {
@@ -641,7 +645,7 @@ impl ElytraBehavior {
             behavior.aim_pos = None;
 
             if !behavior.path_manager.path().is_empty() {
-                let env = behavior.env(ctx, &snap, flags, settings);
+                let env = game_env!(behavior, ctx, &snap, flags, settings);
                 let job = behavior.path_manager.tick(&env);
                 let (clear, blocked) = env.take_lines();
                 drop(env);
@@ -684,7 +688,7 @@ impl ElytraBehavior {
         let mut chosen: Option<(Rotation, bool)> = None;
         core.drive(game, |_pathing, ctx, settings| {
             let snap = PlayerSnapshot::take(ctx);
-            let env = behavior.env(ctx, &snap, flags, settings);
+            let env = game_env!(behavior, ctx, &snap, flags, settings);
 
             let solver_context = SolverContext {
                 path: behavior.path_manager.path().shared(),
@@ -730,7 +734,7 @@ impl ElytraBehavior {
         });
         if let (Some(s), Some((_, force))) = (&solution, chosen) {
             let going_to = s.going_to.expect("solved");
-            self.use_fireworks(core, game, s.context.start, going_to, s.context.boost.is_boosted(), force);
+            behavior.use_fireworks(core, game, s.context.start, going_to, s.context.boost.is_boosted(), force);
         }
     }
 

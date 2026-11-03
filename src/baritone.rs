@@ -35,7 +35,7 @@ use std::{
 };
 
 pub const ID: &str = "baritone";
-pub const VERSION: &str = "1.1.9";
+pub const VERSION: &str = "1.1.10";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -414,9 +414,6 @@ impl Baritone {
         if game.title.is_some() || game.screen == Screen::Dead || game.sign_edit.is_some() || game.book.is_some() {
             // The title, the death screen, a sign or a book: hold still, keep the plan.
             self.core.input.release(game);
-            if game.bar_attacking() {
-                game.bar_attack(false);
-            }
             return;
         }
         let active = self.procs.any_active();

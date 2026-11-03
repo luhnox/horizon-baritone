@@ -128,9 +128,6 @@ impl Core {
         self.dig.active = None;
         self.drive(game, |p, ctx, _| p.force_cancel(ctx));
         self.input.release(game);
-        if game.bar_attacking() {
-            game.bar_attack(false);
-        }
     }
 
     /// Forget the goal as well.
@@ -181,12 +178,6 @@ impl Core {
         true
     }
 
-    fn stop_attacking(game: &mut Game<'_>) {
-        if game.bar_attacking() {
-            game.bar_attack(false);
-        }
-    }
-
     fn dig_step(&mut self, game: &mut Game<'_>) {
         let Some(d) = self.dig.active.as_ref() else {
             return;
@@ -194,14 +185,14 @@ impl Core {
         let (pos, before, started, slot) = (d.pos, d.before, d.started, d.slot);
         let now = game.world.block(pos[0], pos[1], pos[2]);
         if now != before {
-            Self::stop_attacking(game);
+            self.input.hold_attack(false);
             let name = game.res.facts().get(before).name.to_string();
             self.dig.broken.push((pos, name));
             self.dig.active = None;
             return;
         }
         if game.ticks.saturating_sub(started) > DIG_LIMIT {
-            Self::stop_attacking(game);
+            self.input.hold_attack(false);
             self.dig.active = None;
             self.say_red(game, "A block would not break.");
             return;
@@ -210,15 +201,13 @@ impl Core {
             inv::select(game, slot);
         }
         if let Err(why) = game.bar_aim_why(pos) {
-            Self::stop_attacking(game);
+            self.input.hold_attack(false);
             self.dig.active = None;
             let feet = self.player_feet(game).unwrap_or([0, 0, 0]);
             self.say_red(game, &format!("Cannot break {} at {}, {}, {} from {}, {}, {}: {why}", block_name(game, pos).trim_start_matches("minecraft:"), pos[0], pos[1], pos[2], feet[0], feet[1], feet[2]));
             return;
         }
-        if !game.bar_attacking() {
-            game.bar_attack(true);
-        }
+        self.input.hold_attack(true);
     }
 
     // -----------------------------------------------------------------------------------

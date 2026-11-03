@@ -69,7 +69,11 @@ pub struct Input {
     forced: HashMap<In, bool>,
     /// The keys put into the game's set, so they can be taken out again.
     down: HashSet<KeyCode>,
+    /// Whether Baritone itself is holding the left mouse button. The game's own left button is the player's too, so it is
+    /// only ever let go of when this says Baritone pressed it.
     attacking: bool,
+    /// A block being broken (not a forced input of the Java's): hold the attack until told to stop.
+    dig_attack: bool,
     place_cooldown: i32,
 }
 
@@ -86,6 +90,11 @@ impl Input {
 
     pub fn set_input_force_state(&mut self, input: In, forced: bool) {
         self.forced.insert(input, forced);
+    }
+
+    /// Hold the attack button for a block being broken, or let go of it.
+    pub fn hold_attack(&mut self, on: bool) {
+        self.dig_attack = on;
     }
 
     /// `clearAllKeys`: nothing forced any more (applied at the next `apply`).
@@ -108,12 +117,10 @@ impl Input {
             }
         }
         HELD.with(|h| h.set(bits));
-        let attack = self.is_input_forced_down(In::ClickLeft);
+        let attack = self.is_input_forced_down(In::ClickLeft) || self.dig_attack;
         if attack != self.attacking {
             game.bar_attack(attack);
             self.attacking = attack;
-        } else if !attack && game.bar_attacking() {
-            game.bar_attack(false);
         }
         if self.place_cooldown > 0 {
             self.place_cooldown -= 1;
@@ -126,6 +133,7 @@ impl Input {
 
     /// Let go of everything held, at once.
     pub fn release(&mut self, game: &mut Game<'_>) {
+        self.dig_attack = false;
         self.clear_all_keys();
         self.apply(game);
     }
