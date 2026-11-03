@@ -87,6 +87,8 @@ pub mod baritone_calc_path;
 pub mod baritone_rotation;
 #[path = "behavior/aim.rs"]
 pub mod baritone_aim;
+#[path = "behavior/look.rs"]
+pub mod baritone_look;
 #[path = "behavior/movement_state.rs"]
 pub mod baritone_movement_state;
 #[path = "behavior/player_context.rs"]

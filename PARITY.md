@@ -9,7 +9,7 @@ This port is **not complete**. This file lists the classes of Baritone 1.21.4 (`
 | missing | not written |
 | n/a | Java or Minecraft machinery with no meaning in Rust on Horizon (mixin accessors, the event bus, toasts) |
 
-Rows below: 297 (classes that go together share a row). ported 151, partial 78, missing 29, n/a 39.
+Rows below: 297 (classes that go together share a row). ported 153, partial 76, missing 29, n/a 39.
 
 The settings are 243 of 252 (generated from Settings.java). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`; the processes and the path executor are the largest gap, and 
 
@@ -28,7 +28,7 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | Java | Status | Rust or note |
 |---|---|---|
 | IBehavior | n/a | Rust has no behavior registry |
-| ILookBehavior | partial | src/behavior/look.rs: plain turning, no aim processors |
+| ILookBehavior | ported | src/behavior/look.rs |
 | IPathingBehavior | ported | src/behavior/pathing_behavior.rs |
 
 ## api/behavior/look
@@ -253,7 +253,7 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 |---|---|---|
 | Behavior | n/a |  |
 | InventoryBehavior | partial | src/behavior/inventory.rs: hotbar only |
-| LookBehavior | partial | src/behavior/look.rs |
+| LookBehavior | ported | src/behavior/look.rs: Target.Mode, freeLook, blockFreeLook, antiCheatCompatibility, smoothLook, applied by baritone::look_pre and look_post around the player tick |
 | PathingBehavior | ported | src/behavior/pathing_behavior.rs: the search runs in slices of 2500 nodes a tick, there being no second thread |
 | WaypointBehavior | partial | the death waypoint (doDeathWaypoints) is ported, the bed waypoint is missing; waypoints are kept per world |
 | ForkableRandom | n/a |  |

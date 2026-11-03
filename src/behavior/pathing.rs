@@ -67,15 +67,20 @@ impl Core {
 
     /// Run `f` with the pathing behavior and the game as the player it walks.
     pub fn drive<R>(&mut self, game: &mut Game<'_>, f: impl FnOnce(&mut PathingBehavior, &GameCtx<'_, '_>, &Settings) -> R) -> R {
-        let Core { pathing, input, settings, throwaway, aim, states, world_data, .. } = self;
-        let ctx = GameCtx::new(game, input, settings, throwaway, aim, states, world_data.current.as_ref().map(|d| &d.cache));
+        let Core { pathing, input, settings, throwaway, aim, look, states, world_data, .. } = self;
+        let ctx = GameCtx::new(game, input, settings, throwaway, aim, look, states, world_data.current.as_ref().map(|d| &d.cache));
         f(pathing, &ctx, settings)
     }
 
     /// WorldProvider and the chunk packer, once a tick: follow the world and dimension, queue the chunks that
     /// loaded, pack as many as there is time for, and save now and then.
     pub fn cache_tick(&mut self, game: &mut Game<'_>) {
+        let world_before = self.world_data.current.as_ref().map(|d| d.key.clone());
         self.world_data.follow(game, &self.settings);
+        if world_before != self.world_data.current.as_ref().map(|d| d.key.clone()) {
+            // LookBehavior.onWorldEvent.
+            self.look.on_world_event();
+        }
         self.follow_waypoints(game);
         if !self.settings.flag("chunkCaching") {
             return;

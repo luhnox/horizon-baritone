@@ -35,7 +35,7 @@ use std::{
 };
 
 pub const ID: &str = "baritone";
-pub const VERSION: &str = "1.1.14";
+pub const VERSION: &str = "1.1.15";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -57,6 +57,8 @@ pub struct Core {
     pub pathing: PathingBehavior,
     /// LookBehavior's aim processor: the noise and the mouse steps of every aim.
     pub aim: AimProcessor,
+    /// LookBehavior: how a rotation a movement asked for is shown, and what the server was last sent.
+    pub look: super::baritone_look::LookBehavior,
     /// The cached world of the world and dimension being played in.
     pub world_data: super::baritone_world_data::WorldProvider,
     /// The game's block states as the pathfinder's, kept between ticks.
@@ -95,6 +97,7 @@ impl Core {
             input: Input::default(),
             pathing: PathingBehavior::new(),
             aim: AimProcessor::new(super::baritone_command::now_ms()),
+            look: Default::default(),
             world_data: Default::default(),
             states: std::rc::Rc::new(super::baritone_state_factory::StateFactory::new(game)),
             path_hooks: None,
@@ -595,7 +598,36 @@ pub fn with<R>(game: &mut Game<'_>, f: impl FnOnce(&mut Baritone, &mut Game<'_>)
     Some(r)
 }
 
+/// `onPlayerUpdate` PRE, just before the player's motion reads its rotation.
+pub fn look_pre(game: &mut Game<'_>) {
+    if !game.native_window() {
+        return;
+    }
+    with(game, |b, game| {
+        let Core { look, aim, settings, .. } = &mut b.core;
+        let aim_settings = super::baritone_aim::AimSettings::of(settings, f64::from(game.settings.sensitivity));
+        let current = super::baritone_rotation::Rotation::new(game.yaw, game.pitch);
+        if let Some(actual) = look.pre(current, aim, &aim_settings, settings) {
+            game.yaw = actual.yaw;
+            game.pitch = actual.pitch.clamp(-90.0, 90.0);
+        }
+    });
+}
+
+/// `onPlayerUpdate` POST, once the tick has been sent to the server.
+pub fn look_post(game: &mut Game<'_>) {
+    with(game, |b, game| {
+        let fall_flying = game.player.as_ref().is_some_and(|p| p.fall_flying);
+        let current = super::baritone_rotation::Rotation::new(game.yaw, game.pitch);
+        if let Some(shown) = b.core.look.post(current, fall_flying, &b.core.settings) {
+            game.yaw = shown.yaw;
+            game.pitch = shown.pitch.clamp(-90.0, 90.0);
+        }
+    });
+}
+
 pub fn tick(game: &mut Game<'_>) {
+    look_post(game);
     super::baritone_input::back(game);
     if !game.native_window() {
         return;
@@ -623,6 +655,7 @@ fn publish_tab(b: &mut Baritone, game: &mut Game<'_>) {
 
 /// The mod was turned off: stop and draw nothing.
 pub fn stop(game: &mut Game<'_>) {
+    look_post(game);
     if !game.native_window() {
         return;
     }

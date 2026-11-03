@@ -2,6 +2,7 @@
 // Horizon's player, world and inventory into what the ported Baritone code asks for. Block states are
 // built from Horizon's facts once per state id and shared.
 use super::baritone_aim::{AimProcessor, AimSettings};
+use super::baritone_look::{LookBehavior, Mode};
 use super::baritone_cached_world::CachedWorld;
 use super::baritone_block_state::{BlockState, Class, FluidKind};
 use super::baritone_state_factory::StateFactory;
@@ -33,6 +34,7 @@ pub struct GameCtx<'a, 'g> {
     settings: &'a Settings,
     throwaway: &'a [String],
     aim: &'a AimProcessor,
+    look: RefCell<&'a mut LookBehavior>,
     aim_settings: AimSettings,
     factory: &'a StateFactory,
     cache: Option<&'a CachedWorld>,
@@ -43,7 +45,7 @@ pub struct GameCtx<'a, 'g> {
 }
 
 impl<'a, 'g> GameCtx<'a, 'g> {
-    pub fn new(game: &'a mut Game<'g>, input: &'a mut InputHandler, settings: &'a Settings, throwaway: &'a [String], aim: &'a AimProcessor, factory: &'a StateFactory, cache: Option<&'a CachedWorld>) -> Self {
+    pub fn new(game: &'a mut Game<'g>, input: &'a mut InputHandler, settings: &'a Settings, throwaway: &'a [String], aim: &'a AimProcessor, look: &'a mut LookBehavior, factory: &'a StateFactory, cache: Option<&'a CachedWorld>) -> Self {
         let aim_settings = AimSettings::of(settings, f64::from(game.settings.sensitivity));
         Self {
             game: RefCell::new(game),
@@ -51,6 +53,7 @@ impl<'a, 'g> GameCtx<'a, 'g> {
             settings,
             throwaway,
             aim,
+            look: RefCell::new(look),
             aim_settings,
             factory,
             cache,
@@ -166,7 +169,8 @@ impl PlayerContext for GameCtx<'_, '_> {
     }
 
     fn player_rotations(&self) -> Rotation {
-        self.player(|g| Rotation::new(g.yaw, g.pitch))
+        // BaritonePlayerContext.playerRotations: with freeLook the server's rotation, else the player's own.
+        self.look.borrow().effective_rotation(self.settings).unwrap_or_else(|| self.player(|g| Rotation::new(g.yaw, g.pitch)))
     }
 
     fn on_ground(&self) -> bool {
@@ -443,13 +447,29 @@ impl PlayerContext for GameCtx<'_, '_> {
     }
 
     fn mobs_to_avoid(&self) -> Vec<Pos> {
-        // Every Mob, but a spider by day, an unangered zombified piglin and an enderman nobody is looking at,
-        // none of which can be told from here.
+        // Avoidance.create: every Mob, but a spider where the light is bright (Spider is the cave spider too), a
+        // zombified piglin nobody has angered and an enderman that is not creepy (aggravated).
+        let feet = self.player_feet();
         self.player(|g| {
+            let light = g.world.light(feet[0], feet[1], feet[2]);
+            let raw = (i32::from(light >> 4) - g.sky_darken()).max(i32::from(light & 15)).clamp(0, 15) as f32 / 15.0;
+            let base = raw / (4.0 - 3.0 * raw);
+            // DimensionType.brightness: lerp(ambientLight, curve, 1).
+            let ambient = match g.dim {
+                super::Dim::Nether => 0.1,
+                super::Dim::End => 0.25,
+                _ => 0.0,
+            };
+            let dark = base + ambient * (1.0 - base) < 0.5;
             g.mobs
                 .iter()
                 .filter(|m| m.alive())
-                .filter(|m| !matches!(&*m.kind.id, "minecraft:spider" | "minecraft:cave_spider" | "minecraft:zombified_piglin" | "minecraft:enderman"))
+                .filter(|m| match &*m.kind.id {
+                    "minecraft:spider" | "minecraft:cave_spider" => dark,
+                    "minecraft:zombified_piglin" => m.ai.target.is_some() || m.extra.anger > 0,
+                    "minecraft:enderman" => m.ai.target.is_some(),
+                    _ => true,
+                })
                 .map(|m| feet_of([m.position.x, m.position.y, m.position.z]))
                 .collect()
         })
@@ -489,13 +509,12 @@ impl PlayerContext for GameCtx<'_, '_> {
         found
     }
 
-    fn update_look_target(&self, rotation: Rotation, _force: bool) {
-        // LookBehavior.updateTarget in its CLIENT mode: the camera turns (there is no silent server-side rotation
-        // here), by whole mouse steps and with the noise of the aim processor.
-        let actual = self.peek_rotation(rotation);
-        let mut g = self.game.borrow_mut();
-        g.yaw = actual.yaw;
-        g.pitch = actual.pitch.clamp(-90.0, 90.0);
+    fn update_look_target(&self, rotation: Rotation, block_interact: bool) {
+        // LookBehavior.updateTarget: the mode is decided now, the rotation is applied by `baritone::look_pre` just before
+        // the player's motion reads it.
+        let fall_flying = self.player(|g| g.player.as_ref().is_some_and(|p| p.fall_flying));
+        let mode = Mode::resolve(self.settings, fall_flying, self.is_swimming(), block_interact);
+        self.look.borrow_mut().update_target(rotation, mode);
     }
 
     fn clear_all_keys(&self) {

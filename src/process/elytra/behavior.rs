@@ -681,7 +681,8 @@ impl ElytraBehavior {
             simulation_ticks: settings.int("elytraSimulationTicks") as i32,
             render_hitbox_raytraces: settings.flag("elytraRenderHitboxRaytraces"),
         };
-        let (yaw, pitch) = (game.yaw, game.pitch);
+        let known = core.look.effective_rotation(&core.settings).unwrap_or(Rotation::new(game.yaw, game.pitch));
+        let (yaw, pitch) = (known.yaw, known.pitch);
         let aim_proto = TickableAim::new(core.aim.fork(), Rotation::new(yaw, pitch), AimSettings::of(settings, sensitivity));
         let behavior = self;
         let mut solution: Option<Solution> = None;
