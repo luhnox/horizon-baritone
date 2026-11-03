@@ -57,6 +57,12 @@ name = "baritone_builder_logic"
 source = "src/process/builder_logic.rs"
 
 [[module]]
+id = "mod_elytra_chunk"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_chunk"
+source = "src/process/elytra/chunk.rs"
+
+[[module]]
 id = "mod_cached_world"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_cached_world"
