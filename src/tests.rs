@@ -276,8 +276,8 @@ mod extras {
         use crate::baritone_goals::*;
         assert_eq!(GoalBlock([1, 2, 3]).label(), "GoalBlock{x=1,y=2,z=3}");
         assert_eq!(GoalXZ(4, 5).label(), "GoalXZ{x=4,z=5}");
-        assert_eq!(GoalYLevel(70).label(), "GoalYLevel{level=70}");
-        assert_eq!(GoalNear([1, 2, 3], 4).label(), "GoalNear{x=1,y=2,z=3,rangeSq=16}");
+        assert_eq!(GoalYLevel(70).label(), "GoalYLevel{y=70}");
+        assert_eq!(GoalNear([1, 2, 3], 4).label(), "GoalNear{x=1, y=2, z=3, rangeSq=16}");
         assert_eq!(GoalInverted(rc(GoalXZ(0, 0))).label(), "GoalInverted{GoalXZ{x=0,z=0}}");
         assert_eq!(pos_label([1, 2, 3]), "BetterBlockPos{x=1,y=2,z=3}");
         assert_eq!(direction_vector("EAST"), Some([1, 0, 0]));

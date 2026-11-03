@@ -35,7 +35,7 @@ use std::{
 };
 
 pub const ID: &str = "baritone";
-pub const VERSION: &str = "1.0.0";
+pub const VERSION: &str = "1.1.1";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -112,6 +112,7 @@ impl Core {
 
     /// The values worked out from settings, after any of them changes.
     pub fn refresh(&mut self) {
+        super::baritone_goals::set_cost_heuristic(self.settings.float("costHeuristic"));
         self.avoid_breaking = self.settings.list("blocksToAvoidBreaking");
         self.throwaway = self.settings.list("acceptableThrowawayItems");
     }

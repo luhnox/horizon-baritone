@@ -209,8 +209,7 @@ impl PathingBehavior {
             // Cannot check above: current and start can be equal even if the positions are not.
             return None;
         }
-        // goal.heuristic() with no argument is the heuristic at the goal itself: 0 for the goals here.
-        Some((current - 0.0).abs() * f64::from(self.ticks_elapsed_so_far) / (start_h - current).abs())
+        Some((current - goal.heuristic0()).abs() * f64::from(self.ticks_elapsed_so_far) / (start_h - current).abs())
     }
 
     fn reset_estimated_ticks_to_goal(&mut self, start: Pos) {

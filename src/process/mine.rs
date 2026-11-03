@@ -62,6 +62,9 @@ impl Goal for Branch {
     fn heuristic(&self, p: Pos) -> f64 {
         self.0.heuristic(p)
     }
+    fn heuristic0(&self) -> f64 {
+        f64::NEG_INFINITY
+    }
     fn label(&self) -> String {
         self.0.label()
     }
