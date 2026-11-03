@@ -9,9 +9,9 @@ This port is **not complete**. This file lists the classes of Baritone 1.21.4 (`
 | missing | not written |
 | n/a | Java or Minecraft machinery with no meaning in Rust on Horizon (mixin accessors, the event bus, toasts) |
 
-Rows below: 297 (classes that go together share a row). ported 119, partial 89, missing 50, n/a 39.
+Rows below: 297 (classes that go together share a row). ported 151, partial 78, missing 29, n/a 39.
 
-The settings are 243 of 252 (generated from Settings.java). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`; the processes and the path executor are the largest gap, and the Nether elytra pathfinder (22 files) is not started.
+The settings are 243 of 252 (generated from Settings.java). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`; the processes and the path executor are the largest gap, and 
 
 
 ## api
@@ -164,7 +164,7 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | IBaritoneProcess | ported | Process trait, src/behavior/pathing.rs |
 | IBuilderProcess | partial | src/process/build.rs |
 | ICustomGoalProcess | ported | src/process/goal.rs |
-| IElytraProcess | partial | src/process/elytra.rs |
+| IElytraProcess | ported | src/process/elytra.rs |
 | IExploreProcess | partial | src/process/explore.rs |
 | IFarmProcess | partial | src/process/farm.rs |
 | IFollowProcess | partial | src/process/follow.rs |
@@ -298,7 +298,7 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | CommandAlias | ported | manager.rs |
 | DefaultCommands | ported | manager.rs (ORDER) |
 | ETACommand | ported | nav.rs |
-| ElytraCommand | partial | work.rs: needs the Nether pathfinder for the same behaviour |
+| ElytraCommand | ported | work.rs |
 | ExecutionControlCommands | ported | nav.rs |
 | ExploreCommand | partial | work.rs |
 | ExploreFilterCommand | partial | work.rs |
@@ -361,14 +361,14 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 
 | Java | Status | Rust or note |
 |---|---|---|
-| MovementAscend | partial | the cost is ported and tested (src/pathing/movement/movements/); the execution that walks it is still the older, simpler one |
-| MovementDescend | partial | the cost is ported and tested (src/pathing/movement/movements/); the execution that walks it is still the older, simpler one |
-| MovementDiagonal | partial | the cost is ported and tested (src/pathing/movement/movements/); the execution that walks it is still the older, simpler one |
-| MovementDownward | partial | the cost is ported and tested (src/pathing/movement/movements/); the execution that walks it is still the older, simpler one |
-| MovementFall | partial | the cost is ported and tested (src/pathing/movement/movements/); the execution that walks it is still the older, simpler one |
-| MovementParkour | partial | the cost is ported and tested (src/pathing/movement/movements/); the execution that walks it is still the older, simpler one |
-| MovementPillar | partial | the cost is ported and tested (src/pathing/movement/movements/); the execution that walks it is still the older, simpler one |
-| MovementTraverse | partial | the cost is ported and tested (src/pathing/movement/movements/); the execution that walks it is still the older, simpler one |
+| MovementAscend | ported | cost and execution (movement_exec.rs) written from the Java; Rust adds swimming and bend pre-turning of its own |
+| MovementDescend | ported | cost and execution (movement_exec.rs) written from the Java; Rust adds swimming and bend pre-turning of its own |
+| MovementDiagonal | ported | cost and execution (movement_exec.rs) written from the Java; Rust adds swimming and bend pre-turning of its own |
+| MovementDownward | ported | cost and execution (movement_exec.rs) written from the Java; Rust adds swimming and bend pre-turning of its own |
+| MovementFall | ported | cost and execution (movement_exec.rs) written from the Java; Rust adds swimming and bend pre-turning of its own |
+| MovementParkour | ported | cost and execution (movement_exec.rs) written from the Java; Rust adds swimming and bend pre-turning of its own |
+| MovementPillar | ported | cost and execution (movement_exec.rs) written from the Java; Rust adds swimming and bend pre-turning of its own |
+| MovementTraverse | ported | cost and execution (movement_exec.rs) written from the Java; Rust adds swimming and bend pre-turning of its own |
 
 ## main/pathing/path
 
@@ -393,7 +393,7 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | BackfillProcess | ported | src/process/backfill.rs |
 | BuilderProcess | partial | src/process/build.rs and builder_logic.rs: written from the Java; the inventory moves of allowInventory, MapArt and selection schematics, buildRepeat and the substitutes are not |
 | CustomGoalProcess | ported | src/process/goal.rs: disconnectOnArrival and the elytra hand-over are not |
-| ElytraProcess | partial | src/process/elytra.rs: straight flight, not the Java |
+| ElytraProcess | ported | src/process/elytra.rs: written from the Java; disconnectOnArrival only stops |
 | ExploreProcess | ported | src/process/explore.rs over the cached world |
 | FarmProcess | ported | src/process/farm.rs: bone meal targets are crops and cocoa |
 | FollowProcess | ported | src/process/follow.rs |
@@ -405,32 +405,32 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 
 | Java | Status | Rust or note |
 |---|---|---|
-| BlockStateOctreeInterface | missing | the Nether pathfinder |
-| BuildLimitPathFinder | missing | the Nether pathfinder |
-| ElytraBehavior | missing | the Nether pathfinder |
-| IElytraPathFinder | missing | the Nether pathfinder |
-| NetherPath | missing | the Nether pathfinder |
-| NetherPathfinderContext | missing | the Nether pathfinder |
-| PathCalculationException | missing | the Nether pathfinder |
-| UnpackedSegment | missing | the Nether pathfinder |
+| BlockStateOctreeInterface | ported | src/process/elytra/context.rs |
+| BuildLimitPathFinder | ported | src/process/elytra/build_limit.rs |
+| ElytraBehavior | ported | src/process/elytra/behavior.rs, flight.rs (solver and physics), path_manager.rs; the solver runs on the game thread, no elytraAutoSwap |
+| IElytraPathFinder | ported | NetherSearch in build_limit.rs |
+| NetherPath | ported | src/process/elytra/segment.rs |
+| NetherPathfinderContext | ported | src/process/elytra/context.rs: no lock, chunks are immutable snapshots |
+| PathCalculationException | ported | PathCalculationError in segment.rs |
+| UnpackedSegment | ported | src/process/elytra/segment.rs |
 
 ## main/process/elytra/pathfinder
 
 | Java | Status | Rust or note |
 |---|---|---|
-| BaritoneRegion | missing | the Nether pathfinder |
-| BinaryHeapOpenSet | missing | the Nether pathfinder |
-| Chunk | missing | the Nether pathfinder |
-| ChunkGeneratorHell | missing | the Nether pathfinder |
-| NetherPathfinder | missing | the Nether pathfinder |
-| NodePos | missing | the Nether pathfinder |
-| NoiseGeneratorImproved | missing | the Nether pathfinder |
-| NoiseGeneratorOctaves | missing | the Nether pathfinder |
-| PathFinder | missing | the Nether pathfinder |
-| PathNode | missing | the Nether pathfinder |
-| PathSegment | missing | the Nether pathfinder |
-| Raytracer | missing | the Nether pathfinder |
-| Size | missing | the Nether pathfinder |
+| BaritoneRegion | ported | src/process/elytra/region.rs: reads this port's cache layout |
+| BinaryHeapOpenSet | ported | path_node.rs |
+| Chunk | ported | chunk.rs |
+| ChunkGeneratorHell | ported | chunk_generator_hell.rs: matches the native library bit for bit (625 chunks) |
+| NetherPathfinder | ported | nether_pathfinder.rs |
+| NodePos | ported | chunk.rs |
+| NoiseGeneratorImproved | ported | noise.rs |
+| NoiseGeneratorOctaves | ported | noise.rs |
+| PathFinder | ported | path_finder.rs |
+| PathNode | ported | path_node.rs |
+| PathSegment | ported | nether_pathfinder.rs |
+| Raytracer | ported | raytracer.rs: matches the native library on 4000 rays |
+| Size | ported | chunk.rs |
 
 ## main/selection
 
