@@ -57,6 +57,8 @@ pub struct Core {
     pub pathing: PathingBehavior,
     /// LookBehavior's aim processor: the noise and the mouse steps of every aim.
     pub aim: AimProcessor,
+    /// The game's block states as the pathfinder's, kept between ticks.
+    pub states: super::baritone_state_factory::StateFactory,
     /// What the process asking for a path overrides of the calculation context (PathingCommandContext).
     pub path_hooks: Option<std::rc::Rc<dyn super::baritone_calculation_context::CostHooks>>,
     pub dig: DigState,
@@ -89,6 +91,7 @@ impl Core {
             input: Input::default(),
             pathing: PathingBehavior::new(),
             aim: AimProcessor::new(super::baritone_command::now_ms()),
+            states: super::baritone_state_factory::StateFactory::new(game),
             path_hooks: None,
             dig: DigState::default(),
             cache: WorldCache::default(),

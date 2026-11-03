@@ -71,6 +71,19 @@ pub trait PlayerContext {
     fn empty_bucket_hotbar_slot(&self) -> Option<usize>;
     fn select_hotbar_slot(&self, slot: usize);
 
+    // ---- placing blocks (what BuilderProcess asks of the world and the held block item)
+    /// `getStateForPlacement` of the block item in a hotbar slot, for a click on `face` of `clicked` at `hit`
+    /// with the player turned to `rotation`; None when the slot holds no block item or the placement fails.
+    fn state_for_placement(&self, slot: usize, clicked: Pos, face: [i32; 3], hit: [f64; 3], rotation: Rotation) -> Option<std::rc::Rc<super::baritone_block_state::BlockState>>;
+    /// The same, as `BlockItem.place` would do it: only if the block can really be placed there (`canPlace`).
+    fn would_place(&self, slot: usize, clicked: Pos, face: [i32; 3], hit: [f64; 3], rotation: Rotation) -> Option<std::rc::Rc<super::baritone_block_state::BlockState>>;
+    /// `BuilderProcess.approxPlaceable`: what the first `size` slots would place at the feet (air for no block).
+    fn approx_placeable(&self, size: usize) -> Vec<std::rc::Rc<super::baritone_block_state::BlockState>>;
+    /// `BlockState.canSurvive(world, pos)`.
+    fn can_survive(&self, pos: Pos, state: &super::baritone_block_state::BlockState) -> bool;
+    /// `BuilderProcess.placementPlausible`: no entity stands where a solid block would go.
+    fn placement_plausible(&self, pos: Pos, state: &super::baritone_block_state::BlockState) -> bool;
+
     // ---- entities
     /// Where the mobs worth steering clear of are (Avoidance.create's filters).
     fn mobs_to_avoid(&self) -> Vec<Pos>;

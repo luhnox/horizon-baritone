@@ -44,6 +44,9 @@ impl Default for PlayerFacts {
 /// GetToBlockCalculationContext, MineCalculationContext and WalkOffCalculationContext of the Java): the cost
 /// of placing a block and the multiplier on breaking one. Each answers None to leave it to the context.
 pub trait CostHooks {
+    /// What a subclass's constructor changes of the fields (BuilderCalculationContext raises the jump penalty).
+    fn configure(&self, _ctx: &mut CalculationContext) {}
+
     fn cost_of_placing_at(&self, _base: &CalculationContext, _x: i32, _y: i32, _z: i32, _current: &BlockState) -> Option<f64> {
         None
     }
@@ -162,8 +165,15 @@ impl<'a> CalculationContext<'a> {
 
     /// The same context with a process's overrides.
     pub fn with_hooks(mut self, hooks: Option<Rc<dyn CostHooks>>) -> Self {
+        if let Some(h) = &hooks {
+            h.configure(&mut self);
+        }
         self.hooks = hooks;
         self
+    }
+
+    pub fn place_block_cost(&self) -> f64 {
+        self.place_block_cost
     }
 
     pub fn cost_of_placing_at(&self, x: i32, y: i32, z: i32, current: &BlockState) -> f64 {

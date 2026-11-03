@@ -60,8 +60,8 @@ impl Core {
 
     /// Run `f` with the pathing behavior and the game as the player it walks.
     pub fn drive<R>(&mut self, game: &mut Game<'_>, f: impl FnOnce(&mut PathingBehavior, &GameCtx<'_, '_>, &Settings) -> R) -> R {
-        let Core { pathing, input, settings, throwaway, aim, .. } = self;
-        let ctx = GameCtx::new(game, input, settings, throwaway, aim);
+        let Core { pathing, input, settings, throwaway, aim, states, .. } = self;
+        let ctx = GameCtx::new(game, input, settings, throwaway, aim, states);
         f(pathing, &ctx, settings)
     }
 

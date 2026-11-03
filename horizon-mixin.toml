@@ -51,6 +51,12 @@ name = "baritone_scanner"
 source = "src/game/scanner.rs"
 
 [[module]]
+id = "mod_builder_logic"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_builder_logic"
+source = "src/process/builder_logic.rs"
+
+[[module]]
 id = "mod_settings"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_settings"
@@ -247,6 +253,12 @@ id = "mod_inventory"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_inventory"
 source = "src/behavior/inventory.rs"
+
+[[module]]
+id = "mod_state_factory"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_state_factory"
+source = "src/game/state_factory.rs"
 
 [[module]]
 id = "mod_game_ctx"

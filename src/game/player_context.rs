@@ -2,7 +2,8 @@
 // Horizon's player, world and inventory into what the ported Baritone code asks for. Block states are
 // built from Horizon's facts once per state id and shared.
 use super::baritone_aim::{AimProcessor, AimSettings};
-use super::baritone_block_state::{parse_props, BlockState, Class, FluidKind};
+use super::baritone_block_state::{BlockState, Class, FluidKind};
+use super::baritone_state_factory::StateFactory;
 use super::baritone_block_state_interface::BlockStateInterface;
 use super::baritone_calculation_context::{PlayerFacts, ToolSet};
 use super::baritone_gworld::{best_tool, break_progress, loaded};
@@ -15,6 +16,10 @@ use super::baritone_settings::Settings;
 use super::baritone_utils::{feet_of, Pos};
 use super::Game;
 use horizon_client::blocks::Fluid;
+use horizon_core::geometry::{Direction, Vec3};
+use horizon_core::position::BlockPos;
+use horizon_world::level::PlaceContext;
+use horizon_world::registry::BlockStateId;
 use horizon_core::geometry::Axis;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -27,12 +32,12 @@ pub struct GameCtx<'a, 'g> {
     throwaway: &'a [String],
     aim: &'a AimProcessor,
     aim_settings: AimSettings,
-    states: RefCell<HashMap<u32, Rc<BlockState>>>,
+    factory: &'a StateFactory,
     tool_ticks: RefCell<HashMap<u32, f64>>,
 }
 
 impl<'a, 'g> GameCtx<'a, 'g> {
-    pub fn new(game: &'a mut Game<'g>, input: &'a mut InputHandler, settings: &'a Settings, throwaway: &'a [String], aim: &'a AimProcessor) -> Self {
+    pub fn new(game: &'a mut Game<'g>, input: &'a mut InputHandler, settings: &'a Settings, throwaway: &'a [String], aim: &'a AimProcessor, factory: &'a StateFactory) -> Self {
         let aim_settings = AimSettings::of(settings, f64::from(game.settings.sensitivity));
         Self {
             game: RefCell::new(game),
@@ -41,39 +46,8 @@ impl<'a, 'g> GameCtx<'a, 'g> {
             throwaway,
             aim,
             aim_settings,
-            states: RefCell::new(HashMap::new()),
+            factory,
             tool_ticks: RefCell::new(HashMap::new()),
-        }
-    }
-
-    fn build_state(game: &Game<'_>, state: horizon_world::registry::BlockStateId) -> BlockState {
-        let facts = game.res.facts().get(state);
-        let fluid_source = facts.fluid_level == 8 && !facts.fluid_falling;
-        let fluid = match facts.fluid {
-            Fluid::None => FluidKind::None,
-            Fluid::Water if fluid_source => FluidKind::Water,
-            Fluid::Water => FluidKind::FlowingWater,
-            Fluid::Lava if fluid_source => FluidKind::Lava,
-            Fluid::Lava => FluidKind::FlowingLava,
-        };
-        let (full, empty) = match game.res.collision().cached_shapes().cached_shape(state) {
-            Ok(Some(shape)) if !shape.is_empty() => ([Axis::X, Axis::Y, Axis::Z].into_iter().all(|a| shape.min(a) <= 0.0 && shape.max(a) >= 1.0), false),
-            Ok(Some(_)) => (false, true),
-            _ => (false, false),
-        };
-        BlockState {
-            id: state.0 as u32,
-            name: facts.name.clone(),
-            classes: Class::flags_of(facts.classes.iter().map(|c| &**c)),
-            props: parse_props(&game.state_string(state)),
-            fluid,
-            fluid_amount: facts.fluid_level,
-            hardness: facts.hardness,
-            replaceable: facts.replaceable,
-            full_collision: full,
-            sturdy_top: (facts.sturdy_full >> 1) & 1 == 1,
-            // isPathfindable(LAND): nothing to collide with and no fluid; the rest are the specials the helper handles.
-            pathfindable: empty && facts.fluid == Fluid::None,
         }
     }
 
@@ -111,20 +85,12 @@ impl<'a, 'g> GameCtx<'a, 'g> {
 impl BlockStateInterface for GameCtx<'_, '_> {
     fn get0(&self, x: i32, y: i32, z: i32) -> Rc<BlockState> {
         let g = self.game.borrow();
-        let air = |g: &Game<'_>| g.world.block(x, 0, z);
-        let _ = air;
         let id = if y < horizon_client::chunk::MIN_Y || y >= horizon_client::chunk::MIN_Y + horizon_client::chunk::HEIGHT || !loaded(&g, [x, y, z]) {
             g.res.facts().air
         } else {
             g.world.block(x, y, z)
         };
-        let key = id.0 as u32;
-        if let Some(s) = self.states.borrow().get(&key) {
-            return s.clone();
-        }
-        let built = Rc::new(Self::build_state(&g, id));
-        self.states.borrow_mut().insert(key, built.clone());
-        built
+        self.factory.state(id)
     }
 
     fn is_loaded(&self, x: i32, z: i32) -> bool {
@@ -397,6 +363,49 @@ impl PlayerContext for GameCtx<'_, '_> {
         })
     }
 
+    fn state_for_placement(&self, slot: usize, clicked: Pos, face: [i32; 3], hit: [f64; 3], rotation: Rotation) -> Option<Rc<BlockState>> {
+        let (ctx, block) = self.place_context(slot, clicked, face, hit, rotation)?;
+        let id = self.game.borrow_mut().with_level(|b, level, ticks| b.state_for_placement(level, ticks, block, &ctx))?;
+        Some(self.rc_state(id))
+    }
+
+    fn would_place(&self, slot: usize, clicked: Pos, face: [i32; 3], hit: [f64; 3], rotation: Rotation) -> Option<Rc<BlockState>> {
+        let (ctx, _) = self.place_context(slot, clicked, face, hit, rotation)?;
+        let (_, id) = self.game.borrow_mut().with_level(|b, level, ticks| b.placement_state(level, ticks, &ctx))?;
+        Some(self.rc_state(id))
+    }
+
+    fn approx_placeable(&self, size: usize) -> Vec<Rc<BlockState>> {
+        let feet = self.player_feet();
+        let p = self.position();
+        let rotation = self.player_rotations();
+        let air = {
+            let g = self.game.borrow();
+            self.rc_state(g.res.facts().air)
+        };
+        (0..size).map(|slot| self.state_for_placement(slot, feet, [0, 1, 0], p, rotation).unwrap_or_else(|| air.clone())).collect()
+    }
+
+    fn can_survive(&self, pos: Pos, state: &BlockState) -> bool {
+        self.game.borrow_mut().with_level(|b, level, ticks| b.can_survive(level, ticks, BlockPos::new(pos[0], pos[1], pos[2]), BlockStateId(state.id as _)))
+    }
+
+    fn placement_plausible(&self, pos: Pos, state: &BlockState) -> bool {
+        if !state.full_collision {
+            return true; // an empty collision shape is unobstructed
+        }
+        let (x, y, z) = (f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]));
+        let overlaps = |px: f64, py: f64, pz: f64, width: f64, height: f64| {
+            let half = width / 2.0;
+            px + half > x && px - half < x + 1.0 && py + height > y && py < y + 1.0 && pz + half > z && pz - half < z + 1.0
+        };
+        self.player(|g| {
+            let me = g.player.as_ref().is_some_and(|p| overlaps(p.position.x, p.position.y, p.position.z, f64::from(p.dimensions.width), f64::from(p.dimensions.height)));
+            let mobs = g.mobs.iter().filter(|m| m.alive()).any(|m| overlaps(m.position.x, m.position.y, m.position.z, 0.6, 1.8));
+            !(me || mobs)
+        })
+    }
+
     fn mobs_to_avoid(&self) -> Vec<Pos> {
         // Every Mob, but a spider by day, an unangered zombified piglin and an enderman nobody is looking at,
         // none of which can be told from here.
@@ -471,6 +480,41 @@ impl PlayerContext for GameCtx<'_, '_> {
 }
 
 impl GameCtx<'_, '_> {
+    /// A state of the game as the pathfinder's BlockState, from the cache the reads share.
+    pub fn rc_state(&self, id: BlockStateId) -> Rc<BlockState> {
+        self.factory.state(id)
+    }
+
+    /// The PlaceContext for a click, and the block the item places.
+    fn place_context(&self, slot: usize, clicked: Pos, face: [i32; 3], hit: [f64; 3], rotation: Rotation) -> Option<(PlaceContext, horizon_world::level::BlockId)> {
+        let sneaking = self.is_crouching();
+        let g = self.game.borrow();
+        let stack = g.inventory.get(slot).and_then(Option::as_ref).filter(|s| s.count > 0)?;
+        let info = g.res.items().get(&stack.item)?;
+        let state = info.block?;
+        let direction = match face {
+            [0, 1, 0] => Direction::Up,
+            [0, -1, 0] => Direction::Down,
+            [0, 0, -1] => Direction::North,
+            [0, 0, 1] => Direction::South,
+            [-1, 0, 0] => Direction::West,
+            _ => Direction::East,
+        };
+        let context = PlaceContext {
+            clicked_pos: BlockPos::new(clicked[0], clicked[1], clicked[2]),
+            face: direction,
+            hit: Vec3::new(hit[0], hit[1], hit[2]),
+            inside: false,
+            yaw: rotation.yaw,
+            pitch: rotation.pitch,
+            sneaking,
+            item: stack.item.to_string(),
+            can_use_game_master_blocks: false,
+        };
+        let block = g.behaviours().block(state);
+        Some((context, block))
+    }
+
     fn selected(&self) -> Option<(Pos, [i32; 3])> {
         let eye = self.eye_with(false);
         self.player(|g| {
