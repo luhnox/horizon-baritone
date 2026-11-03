@@ -158,6 +158,7 @@ impl Core {
             p.post_tick(ctx, s, command, hooks, ticks);
         });
         let lines: Vec<String> = self.pathing.log.drain(..).collect();
+        self.input.right_click_speed = self.settings.int("rightClickSpeed");
         self.input.apply(game);
         if self.settings.flag("chatDebug") { lines } else { Vec::new() }
     }

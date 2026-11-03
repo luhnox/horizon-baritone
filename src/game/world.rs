@@ -85,6 +85,16 @@ pub fn classify(game: &Game<'_>, state: BlockStateId) -> Cell {
     }
 }
 
+thread_local! {
+    /// `itemSaver`: tools with this much durability left or less are not used (None when the setting is off). Set once a
+    /// tick from the settings, since the tool choice is made far from where the settings are at hand.
+    static ITEM_SAVER: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
+}
+
+pub fn set_item_saver(threshold: Option<i32>) {
+    ITEM_SAVER.with(|s| s.set(threshold));
+}
+
 /// baritone.utils.ToolSet.getStrVsBlock: how much of the block one tick of the best tool at hand breaks
 /// (the breaking progress per tick, not rounded to whole ticks), and which hotbar slot that tool is in.
 /// None when nothing can break it.
@@ -101,7 +111,15 @@ pub fn break_progress(game: &Game<'_>, state: BlockStateId, auto_tool: bool) -> 
     let slots: Vec<usize> = if auto_tool { (0..9).collect() } else { vec![game.selected] };
     // Bare hands, and each stack in the hotbar.
     let candidates = std::iter::once((None, None)).chain(slots.into_iter().map(|i| (game.inventory.get(i).and_then(Option::as_ref), Some(i))));
+    let saver = ITEM_SAVER.with(std::cell::Cell::get);
     for (stack, slot) in candidates {
+        // ToolSet.getBestSlot: a tool about to break is left alone when itemSaver is on.
+        if let (Some(threshold), Some(s)) = (saver, stack) {
+            let max = items.get(&s.item).map_or(0, |i| i.max_damage as i32);
+            if max > 1 && max - s.damage as i32 <= threshold {
+                continue;
+            }
+        }
         let speed = f64::from(items.mining_speed(stack, &facts.name));
         let harvest = !facts.requires_tool || items.correct_for_drops(stack, &facts.name);
         let progress = speed / f64::from(facts.hardness) / if harvest { 30.0 } else { 100.0 };

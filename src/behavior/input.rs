@@ -74,6 +74,8 @@ pub struct Input {
     attacking: bool,
     /// A block being broken (not a forced input of the Java's): hold the attack until told to stop.
     dig_attack: bool,
+    /// `rightClickSpeed`: the ticks between two right clicks, set from the settings each tick.
+    pub right_click_speed: i32,
     place_cooldown: i32,
 }
 
@@ -127,7 +129,7 @@ impl Input {
         }
         if self.is_input_forced_down(In::ClickRight) && self.place_cooldown <= 0 {
             game.bar_use();
-            self.place_cooldown = 4; // BlockPlaceHelper's rightClickSpeed
+            self.place_cooldown = self.right_click_speed;
         }
     }
 

@@ -166,9 +166,13 @@ impl Core {
         let text = match std::fs::read_to_string(&file) {
             Ok(t) => t,
             Err(_) => {
+                // A file marks the move as done: a setting that is not one of Baritone's own is not kept between runs.
                 let legacy = game.native_setting(ID, "waypoints").unwrap_or_default();
-                if !legacy.trim().is_empty() && game.native_setting(ID, "waypoints_moved").is_none() {
-                    game.native_set_setting(ID, "waypoints_moved", "1");
+                let marker = game.native_data_dir(ID).join("waypoints_moved");
+                if !legacy.trim().is_empty() && !marker.exists() {
+                    let _ = std::fs::create_dir_all(game.native_data_dir(ID));
+                    let _ = std::fs::write(&marker, "The waypoints older versions kept for every world were moved to the first world opened after that.
+");
                     legacy
                 } else {
                     String::new()
@@ -439,6 +443,7 @@ impl Baritone {
             }
             return;
         }
+        super::baritone_gworld::set_item_saver(if self.core.settings.flag("itemSaver") { Some(self.core.settings.int("itemSaverThreshold")) } else { None });
         self.core.cache.note_chunks(game);
         self.core.cache_tick(game);
         self.track_death(game);
@@ -468,7 +473,7 @@ impl Baritone {
 
     fn track_death(&mut self, game: &mut Game<'_>) {
         let dead = game.screen == Screen::Dead;
-        if dead && !self.core.was_dead {
+        if dead && !self.core.was_dead && self.core.settings.flag("doDeathWaypoints") {
             if let Some(p) = player_pos(game) {
                 let wp = Waypoint {
                     tag: Tag::Death,
