@@ -35,6 +35,8 @@ pub mod baritone_elytra_search;
 pub mod baritone_elytra_segment;
 #[path = "process/elytra/flight.rs"]
 pub mod baritone_elytra_flight;
+#[path = "process/elytra/context.rs"]
+pub mod baritone_elytra_context;
 #[path = "process/elytra/build_limit.rs"]
 pub mod baritone_elytra_build_limit;
 #[path = "process/elytra/path_manager.rs"]

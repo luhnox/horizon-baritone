@@ -117,6 +117,12 @@ name = "baritone_elytra_flight"
 source = "src/process/elytra/flight.rs"
 
 [[module]]
+id = "mod_elytra_context"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_context"
+source = "src/process/elytra/context.rs"
+
+[[module]]
 id = "mod_elytra_build_limit"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_elytra_build_limit"

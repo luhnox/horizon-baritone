@@ -90,6 +90,7 @@ impl NodePos {
     }
 }
 
+#[derive(Clone)]
 pub struct Chunk {
     sections: Vec<Option<Box<[u64; SECTION_LONGS]>>>,
     /// Bit i of entry s says whether x8 cube i of section s holds a block; a section that is None has 0.
