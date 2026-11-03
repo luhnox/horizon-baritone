@@ -144,7 +144,8 @@ fn build(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResul
     })?;
     let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     begin(b, game)?;
-    b.procs.build.build(name, Rc::new(schematic), build_origin, true, game.ticks);
+    let Baritone { core, procs, .. } = b;
+    procs.build.build(core, game, name, Rc::new(schematic), build_origin);
     b.core.say(game, &format!("Successfully loaded schematic for building\nOrigin: {}", pos_label(build_origin)));
     Ok(())
 }
@@ -181,7 +182,8 @@ fn tunnel(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
         };
         begin(b, game)?;
         b.core.say(game, &format!("Creating a tunnel {} block(s) high, {} block(s) wide, and {depth} block(s) deep", height + 1, width + 1));
-        b.procs.build.clear_area(c1, c2, game.ticks);
+        let Baritone { core, procs, .. } = b;
+        procs.build.clear_area(core, game, c1, c2);
     } else {
         begin(b, game)?;
         let goal = rc(GoalStrictDirection { origin: at, dx: step.0, dz: step.1 });
@@ -384,7 +386,8 @@ fn sel(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
             let size = [hi[0] - origin[0] + 1, hi[1] - origin[1] + 1, hi[2] - origin[2] + 1];
             let composite = CompositeSchematic { size, parts, name: "Fill".into() };
             begin(b, game)?;
-            b.procs.build.build("Fill".into(), Rc::new(composite), origin, true, game.ticks);
+            let Baritone { core, procs, .. } = b;
+            procs.build.build(core, game, "Fill".into(), Rc::new(composite), origin);
             b.core.say(game, "Filling now");
         }
         Action::Copy => {
@@ -431,7 +434,8 @@ fn sel(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
             let clip = b.core.clipboard.clone().ok_or_else(|| CommandError::new("You need to copy a selection first"))?;
             let off = b.core.clipboard_offset;
             begin(b, game)?;
-            b.procs.build.build("Paste".into(), clip, [pos[0] + off[0], pos[1] + off[1], pos[2] + off[2]], true, game.ticks);
+            let Baritone { core, procs, .. } = b;
+            procs.build.build(core, game, "Paste".into(), clip, [pos[0] + off[0], pos[1] + off[1], pos[2] + off[2]]);
             b.core.say(game, "Building now");
         }
         Action::Expand | Action::Contract | Action::Shift => {

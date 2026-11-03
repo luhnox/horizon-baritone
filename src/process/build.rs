@@ -1,443 +1,689 @@
-// baritone.process.BuilderProcess: make the world match a schematic. It looks for the blocks that are
-// wrong, lowest layer first, walks to where one of them is in reach, and breaks it or puts the right
-// block there. `#tunnel` and `#sel set|walls|sphere|replace...` are builds of the same kind.
-//
-// A block's properties (which way a stair faces) are not placed: the block is, and what the game
-// decides for the click is what it is.
+// baritone.process.BuilderProcess, written from the Java: make the world match a schematic. Each tick it
+// finds the blocks that are wrong around the player, breaks one that is in reach, places one that can be
+// placed from here (choosing the hotbar slot whose block would come out as the schematic wants), and otherwise
+// asks the pathing behavior for a goal that gets it next to the work (GoalBreak, GoalPlace, GoalAdjacent), with
+// a calculation context (BuilderHooks) that makes placing a correct block free. `#tunnel` and `#sel` are builds
+// of the same kind.
 use super::baritone::Core;
-use super::baritone_goals::{rc, xz_heuristic, y_heuristic, Goal};
-use super::baritone_gworld::{block_name, count_items, exposed, hotbar_slot, loaded, GameTerrain};
-use super::baritone_legacy_helper::{Cell, Terrain};
-use super::baritone_inventory as inv;
+use super::baritone_block_state::{BlockState, Class};
+use super::baritone_builder_logic::{contains_blockstate, valid, BuilderHooks, ISchematic, LayeredSchematic, ValidSettings};
+use super::baritone_calculation_context::{CalculationContext, CostHooks};
+use super::baritone_goals::{rc, Goal, GoalAdjacent, GoalBlock, GoalBreak, GoalBreakFromAbove, GoalComposite, GoalPlace, GoalRef, JankyGoalComposite};
+use super::baritone_movement_helper as mh;
+use super::baritone_movement_state::Input;
 use super::baritone_pathing::{PathingCommand, Process};
+use super::baritone_player_context::PlayerContext;
+use super::baritone_rotation::{calc_rotation_from_vec3d, Rotation};
 use super::baritone_schematic::{BlockSpec, Schematic};
-use super::baritone_utils::{dist_sq, up, Pos};
+use super::baritone_state_factory::StateFactory;
+use super::baritone_utils::{dist_sq, Pos};
 use super::Game;
-use std::{
-    collections::{BTreeMap, HashMap},
-    rc::Rc,
-};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
-#[derive(Clone, Debug, PartialEq)]
-enum Need {
-    Break,
-    Place(BlockSpec),
+/// `Direction.values()`: down, up, north, south, west, east.
+const DIRECTIONS: [[i32; 3]; 6] = [[0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]];
+
+/// What `Placement` holds: the slot, the block to place against, the face of it, and the aim.
+struct Placement {
+    hotbar_selection: usize,
+    place_against: Pos,
+    side: [i32; 3],
+    rot: Rotation,
 }
 
-#[derive(Clone, Debug)]
-struct Wrong {
-    pos: Pos,
-    need: Need,
+/// A schematic of this crate's kind (what block belongs at a position) read as block states.
+struct SpecSchematic {
+    inner: Rc<dyn Schematic>,
+    factory: Rc<StateFactory>,
+    skip_blocks: Vec<String>,
+    cache: RefCell<HashMap<(String, Vec<(String, String)>), Rc<BlockState>>>,
+    air: Rc<BlockState>,
 }
 
-/// Standing where a block at `target` can be reached by hand, but not inside it.
-struct ReachGoal {
-    target: Pos,
-}
-
-impl ReachGoal {
-    fn eye_dist_sq(&self, p: Pos) -> f64 {
-        let eye = [f64::from(p[0]) + 0.5, f64::from(p[1]) + 1.62, f64::from(p[2]) + 0.5];
-        let c = [f64::from(self.target[0]) + 0.5, f64::from(self.target[1]) + 0.5, f64::from(self.target[2]) + 0.5];
-        (eye[0] - c[0]).powi(2) + (eye[1] - c[1]).powi(2) + (eye[2] - c[2]).powi(2)
+impl SpecSchematic {
+    fn state(&self, spec: &BlockSpec) -> Rc<BlockState> {
+        let key = (spec.name.clone(), spec.props.clone());
+        if let Some(s) = self.cache.borrow().get(&key) {
+            return s.clone();
+        }
+        let state = self.factory.resolve(&spec.name, &spec.props).unwrap_or_else(|| self.air.clone());
+        self.cache.borrow_mut().insert(key, state.clone());
+        state
     }
 }
 
-impl Goal for ReachGoal {
-    fn is_in_goal(&self, p: Pos) -> bool {
-        p != self.target && up(p, 1) != self.target && self.eye_dist_sq(p) <= 3.8 * 3.8
+impl ISchematic for SpecSchematic {
+    fn desired_state(&self, x: i32, y: i32, z: i32, current: &BlockState, _approx_placeable: &[Rc<BlockState>]) -> Rc<BlockState> {
+        match self.inner.desired([x, y, z], &current.name) {
+            Some(spec) => self.state(&spec),
+            None => self.air.clone(),
+        }
     }
-    fn heuristic(&self, p: Pos) -> f64 {
-        let (dx, dz) = (f64::from(p[0] - self.target[0]), f64::from(p[2] - self.target[2]));
-        let flat = (dx.hypot(dz) - 3.0).max(0.0);
-        xz_heuristic(flat, 0.0) + y_heuristic(self.target[1], p[1])
-    }
-    fn label(&self) -> String {
-        format!("within reach of {}, {}, {}", self.target[0], self.target[1], self.target[2])
-    }
-    fn render_pos(&self) -> Option<Pos> {
-        Some(self.target)
-    }
-}
 
-/// The item that places a block (most are the same word).
-pub fn item_for_block(block: &str) -> String {
-    let bare = block.strip_prefix("minecraft:").unwrap_or(block);
-    let item = match bare {
-        "redstone_wire" => "redstone",
-        "wheat" => "wheat_seeds",
-        "carrots" => "carrot",
-        "potatoes" => "potato",
-        "beetroots" => "beetroot_seeds",
-        "melon_stem" => "melon_seeds",
-        "pumpkin_stem" => "pumpkin_seeds",
-        "tripwire" => "string",
-        "cocoa" => "cocoa_beans",
-        "sweet_berry_bush" => "sweet_berries",
-        "bamboo_sapling" => "bamboo",
-        "lava" => "lava_bucket",
-        "water" => "water_bucket",
-        other => other,
-    };
-    let item = item.replace("_wall_", "_").replace("wall_torch", "torch");
-    format!("minecraft:{item}")
+    fn width_x(&self) -> i32 {
+        self.inner.size()[0]
+    }
+
+    fn height_y(&self) -> i32 {
+        self.inner.size()[1]
+    }
+
+    fn length_z(&self) -> i32 {
+        self.inner.size()[2]
+    }
+
+    fn in_schematic(&self, x: i32, y: i32, z: i32, current: &BlockState) -> bool {
+        if !(x >= 0 && x < self.width_x() && y >= 0 && y < self.height_y() && z >= 0 && z < self.length_z()) {
+            return false;
+        }
+        // The mask the builder puts round every schematic: what buildSkipBlocks names is part of nothing.
+        match self.inner.desired([x, y, z], &current.name) {
+            Some(spec) => !self.skip_blocks.iter().any(|b| format!("minecraft:{b}") == spec.name || *b == spec.name),
+            None => false,
+        }
+    }
 }
 
 pub struct BuilderProcess {
-    schematic: Option<Rc<dyn Schematic>>,
-    name: String,
+    incorrect_positions: Option<HashSet<Pos>>,
+    /// Positions that are completed even if they're out of render distance and we can't make sure right now.
+    observed_completed: HashSet<Pos>,
+    name: Option<String>,
+    real_schematic: Option<Rc<dyn ISchematic>>,
+    schematic: Option<Rc<dyn ISchematic>>,
     origin: Pos,
-    active: bool,
-    wrong: Vec<Wrong>,
-    next_scan: u64,
-    blacklist: HashMap<Pos, u64>,
-    tries: HashMap<Pos, u32>,
-    placed: u32,
-    broken: u32,
-    missing: BTreeMap<String, u32>,
-    told_missing: bool,
-    started: u64,
-    /// Work the lowest layer first (a building); false: the nearest first (a tunnel).
-    layered: bool,
-    /// Waiting for materials to be put in the hotbar.
+    ticks: i32,
     paused: bool,
+    layer: i32,
+    num_repeats: i32,
+    approx_placeable: Vec<Rc<BlockState>>,
+    pub stop_at_height: i32,
+    /// `pathStart()` of this tick.
+    expected_start: Pos,
 }
 
 impl BuilderProcess {
     pub fn new() -> Self {
         Self {
+            incorrect_positions: None,
+            observed_completed: HashSet::new(),
+            name: None,
+            real_schematic: None,
             schematic: None,
-            name: String::new(),
             origin: [0, 0, 0],
-            active: false,
-            wrong: Vec::new(),
-            next_scan: 0,
-            blacklist: HashMap::new(),
-            tries: HashMap::new(),
-            placed: 0,
-            broken: 0,
-            missing: BTreeMap::new(),
-            told_missing: false,
-            started: 0,
-            layered: true,
+            ticks: 0,
             paused: false,
+            layer: 0,
+            num_repeats: 0,
+            approx_placeable: Vec::new(),
+            stop_at_height: 0,
+            expected_start: [0, 0, 0],
         }
     }
 
-    /// Build `schematic` with its corner (its x, y, z all zero) at `origin`.
-    pub fn build(&mut self, name: String, schematic: Rc<dyn Schematic>, origin: Pos, layered: bool, tick: u64) {
-        *self = Self::new();
-        self.layered = layered;
-        self.name = name;
-        self.schematic = Some(schematic);
-        self.origin = origin;
-        self.active = true;
-        self.started = tick;
+    /// `build(name, schematic, origin)`.
+    pub fn build(&mut self, core: &mut Core, game: &mut Game<'_>, name: String, schematic: Rc<dyn Schematic>, origin: Pos) {
+        let size = schematic.size();
+        let air = core.drive(game, |_, ctx, _| ctx.air_state());
+        let skip_blocks = core.settings.list("buildSkipBlocks");
+        let spec = Rc::new(SpecSchematic { inner: schematic, factory: core.states.clone(), skip_blocks, cache: RefCell::new(HashMap::new()), air });
+        self.name = Some(name);
+        self.real_schematic = None;
+        self.schematic = Some(spec);
+        let (mut x, mut y, mut z) = (origin[0], origin[1], origin[2]);
+        if core.settings.flag("schematicOrientationX") {
+            x += size[0];
+        }
+        if core.settings.flag("schematicOrientationY") {
+            y += size[1];
+        }
+        if core.settings.flag("schematicOrientationZ") {
+            z += size[2];
+        }
+        self.origin = [x, y, z];
+        self.paused = false;
+        self.layer = core.settings.int("startAtLayer") as i32;
+        self.stop_at_height = size[1];
+        self.num_repeats = 0;
+        self.observed_completed = HashSet::new();
+        self.incorrect_positions = None;
     }
 
-    /// Break everything in the box between two corners, both included.
-    pub fn clear_area(&mut self, c1: Pos, c2: Pos, tick: u64) {
-        let lo = [0, 1, 2].map(|i| c1[i].min(c2[i]));
-        let hi = [0, 1, 2].map(|i| c1[i].max(c2[i]));
-        let size = [hi[0] - lo[0] + 1, hi[1] - lo[1] + 1, hi[2] - lo[2] + 1];
-        let air = super::baritone_schematic::FillSchematic { size, spec: BlockSpec::air() };
-        self.build("clear area".into(), Rc::new(air), lo, false, tick);
+    /// `clearArea(corner1, corner2)`.
+    pub fn clear_area(&mut self, core: &mut Core, game: &mut Game<'_>, c1: Pos, c2: Pos) {
+        let origin = [c1[0].min(c2[0]), c1[1].min(c2[1]), c1[2].min(c2[2])];
+        let size = [(c1[0] - c2[0]).abs() + 1, (c1[1] - c2[1]).abs() + 1, (c1[2] - c2[2]).abs() + 1];
+        let fill = super::baritone_schematic::FillSchematic { size, spec: BlockSpec::air() };
+        self.build(core, game, "clear area".into(), Rc::new(fill), origin);
+    }
+
+    pub fn resume(&mut self) {
+        self.paused = false;
+    }
+
+    pub fn pause(&mut self) {
+        self.paused = true;
     }
 
     pub fn is_paused(&self) -> bool {
         self.paused
     }
 
-    pub fn resume(&mut self) {
+    /// The positions that are not yet as the schematic wants, for drawing.
+    pub fn incorrect(&self) -> impl Iterator<Item = Pos> + '_ {
+        self.incorrect_positions.iter().flatten().copied()
+    }
+
+    fn on_lost_control_inner(&mut self, core: &Core) {
+        self.incorrect_positions = None;
+        self.name = None;
+        self.schematic = None;
+        self.real_schematic = None;
+        self.layer = core.settings.int("startAtLayer") as i32;
+        self.num_repeats = 0;
         self.paused = false;
-        self.told_missing = false;
+        self.observed_completed = HashSet::new();
     }
 
-    pub fn wrong_count(&self) -> usize {
-        self.wrong.len()
-    }
+    /// `onTick` with the recursion counter the Java keeps.
+    fn tick(&mut self, core: &mut Core, game: &mut Game<'_>, calc_failed: bool, is_safe_to_cancel: bool, recursions: u32) -> PathingCommand {
+        if recursions > 100 {
+            // onTick calls itself, don't crash.
+            return PathingCommand::Defer;
+        }
+        self.approx_placeable = core.drive(game, |_, ctx, _| ctx.approx_placeable(36));
+        if core.input.is_input_forced_down(Input::ClickLeft) {
+            self.ticks = 5;
+        } else {
+            self.ticks -= 1;
+        }
+        core.input.clear_all_keys();
+        if self.paused {
+            return PathingCommand::CancelAndClearGoal;
+        }
+        let build_in_layers = core.settings.flag("buildInLayers");
+        let layer_height = core.settings.int("layerHeight") as i32;
+        if build_in_layers {
+            if self.real_schematic.is_none() {
+                self.real_schematic = self.schematic.clone();
+            }
+            let Some(real) = self.real_schematic.clone() else { return PathingCommand::Defer };
+            // layer = 0 should be nothing, layer = realSchematic.heightY() should be everything.
+            let (min_y, max_y) = if core.settings.flag("layerOrder") {
+                // Top to bottom.
+                (real.height_y() - self.layer * layer_height, real.height_y() - 1)
+            } else {
+                (0, self.layer * layer_height - 1)
+            };
+            self.schematic = Some(Rc::new(LayeredSchematic { real, min_y_inclusive: min_y, max_y_inclusive: max_y }));
+        }
+        let Some(schematic) = self.schematic.clone() else { return PathingCommand::Defer };
+        let valid_settings = ValidSettings::of(&core.settings);
+        let hooks = Rc::new(BuilderHooks {
+            placeable: self.approx_placeable.iter().take(9).cloned().collect(),
+            schematic: schematic.clone(),
+            origin: self.origin,
+            valid: valid_settings.clone(),
+            place_incorrect_penalty: core.settings.float("placeIncorrectBlockPenaltyMultiplier"),
+            break_correct_penalty: core.settings.float("breakCorrectBlockPenaltyMultiplier"),
+        });
+        let dyn_hooks: Rc<dyn CostHooks> = hooks.clone();
 
-    pub fn placed(&self) -> u32 {
-        self.placed
-    }
+        let recalculated = core.with_calc_hooks(game, Some(dyn_hooks.clone()), |calc, ctx, s| self.recalc(calc, ctx, s, &hooks, &valid_settings));
+        if !recalculated {
+            if build_in_layers && self.layer * layer_height < self.stop_at_height {
+                core.say(game, &format!("Starting layer {}", self.layer));
+                self.layer += 1;
+                return self.tick(core, game, calc_failed, is_safe_to_cancel, recursions + 1);
+            }
+            // buildRepeat is one of the settings the table cannot hold: a build does not repeat.
+            self.num_repeats += 1;
+            core.say(game, "Done building");
+            self.on_lost_control_inner(core);
+            return PathingCommand::Defer;
+        }
+        if core.settings.flag("distanceTrim") {
+            self.trim(core, game);
+        }
 
-    pub fn broken(&self) -> u32 {
-        self.broken
-    }
-
-    pub fn missing(&self) -> &BTreeMap<String, u32> {
-        &self.missing
-    }
-
-    /// The blocks still wrong, for drawing: where, and whether it is to be broken.
-    pub fn wrong_positions(&self) -> impl Iterator<Item = (Pos, bool)> + '_ {
-        self.wrong.iter().take(120).map(|w| (w.pos, w.need == Need::Break))
-    }
-
-    pub fn origin(&self) -> Pos {
-        self.origin
-    }
-
-    pub fn schematic_size(&self) -> Option<[i32; 3]> {
-        self.schematic.as_ref().map(|s| s.size())
-    }
-
-    /// Everything that differs, bottom layer first (or top first with layerOrder).
-    fn scan(&mut self, core: &Core, game: &Game<'_>) {
-        let Some(sch) = self.schematic.clone() else {
-            return;
-        };
-        let [w, h, l] = sch.size();
-        let settings = &core.settings;
-        let limit = settings.int("incorrectSize").clamp(1, 5000) as usize;
-        let ignore = settings.list("buildIgnoreBlocks");
-        let ignore_existing = settings.flag("buildIgnoreExisting");
-        let ok_if_water = settings.flag("okIfWater");
-        let layers = settings.flag("buildInLayers");
-        let top_down = settings.flag("layerOrder");
-        let mut wrong: Vec<Wrong> = Vec::new();
-        let ys: Vec<i32> = if top_down { (0..h).rev().collect() } else { (0..h).collect() };
-        for y in ys {
-            for z in 0..l {
-                for x in 0..w {
-                    let rel = [x, y, z];
-                    let pos = [self.origin[0] + x, self.origin[1] + y, self.origin[2] + z];
-                    if !loaded(game, pos) {
-                        continue;
-                    }
-                    let state = game.world.block(pos[0], pos[1], pos[2]);
-                    let facts = game.res.facts().get(state);
-                    let current: &str = &facts.name;
-                    let Some(spec) = sch.desired(rel, current) else {
-                        continue;
-                    };
-                    let is_air = game.res.facts().is_air(state);
-                    if spec.is_air() {
-                        if is_air || (ok_if_water && facts.fluid != horizon_client::blocks::Fluid::None) {
-                            continue;
-                        }
-                    } else if current == spec.name {
-                        continue;
-                    }
-                    let bare = current.strip_prefix("minecraft:").unwrap_or(current);
-                    if ignore.iter().any(|i| i == bare) || (ignore_existing && !is_air) {
-                        continue;
-                    }
-                    if self.blacklist.get(&pos).is_some_and(|until| game.ticks < *until) {
-                        continue;
-                    }
-                    if facts.hardness < 0.0 && !is_air {
-                        continue;
-                    }
-                    let need = if spec.is_air() {
-                        Need::Break
-                    } else if is_air || facts.replaceable || facts.fluid != horizon_client::blocks::Fluid::None {
-                        Need::Place(spec)
-                    } else {
-                        Need::Break
-                    };
-                    wrong.push(Wrong { pos, need });
+        let to_break = core.with_calc_hooks(game, Some(dyn_hooks.clone()), |calc, ctx, s| self.to_break_near_player(calc, ctx, s, &hooks, &valid_settings));
+        if let Some((pos, rot)) = to_break {
+            if is_safe_to_cancel && game.player.as_ref().is_some_and(|p| p.ground.on_ground) {
+                // We'd like to pause to break this block; only change look direction if it's safe (don't want to
+                // mess up an in-progress parkour for example).
+                let mut sneaking = false;
+                let mut looking = false;
+                core.drive(game, |_, ctx, _| {
+                    ctx.update_look_target(rot, true);
+                    ctx.switch_to_best_tool_for(pos);
+                    sneaking = ctx.is_crouching();
+                    looking = ctx.is_looking_at(pos) || ctx.player_rotations().is_really_close_to(rot);
+                });
+                if sneaking {
+                    // Really horrible bug where a block is visible for breaking while sneaking but not otherwise.
+                    core.input.set_input_force_state(Input::Sneak, true);
                 }
-            }
-            if layers && !wrong.is_empty() {
-                break;
-            }
-            if wrong.len() >= limit * 4 {
-                break;
+                if looking {
+                    core.input.set_input_force_state(Input::ClickLeft, true);
+                }
+                return PathingCommand::CancelAndClearGoal;
             }
         }
-        self.wrong = wrong;
+        let mut desirable_on_hotbar: Vec<Rc<BlockState>> = Vec::new();
+        let to_place = core.with_calc_hooks(game, Some(dyn_hooks.clone()), |calc, ctx, s| self.search_for_placables(calc, ctx, s, &hooks, &valid_settings, &mut desirable_on_hotbar));
+        if let Some(placement) = to_place {
+            if is_safe_to_cancel && game.player.as_ref().is_some_and(|p| p.ground.on_ground) && self.ticks <= 0 {
+                let mut click = false;
+                core.drive(game, |_, ctx, _| {
+                    ctx.update_look_target(placement.rot, true);
+                    ctx.select_hotbar_slot(placement.hotbar_selection);
+                    let facing = ctx.is_looking_at(placement.place_against) && ctx.selected_face() == Some(placement.side);
+                    click = facing || ctx.player_rotations().is_really_close_to(placement.rot);
+                });
+                core.input.set_input_force_state(Input::Sneak, true);
+                if click {
+                    core.input.set_input_force_state(Input::ClickRight, true);
+                }
+                return PathingCommand::CancelAndClearGoal;
+            }
+        }
+
+        if core.settings.flag("allowInventory") {
+            // Moving items in the inventory to the hotbar needs the inventory behavior's slot moves, which are not
+            // ported: the hotbar is all that is used.
+        }
+
+        let hotbar: Vec<Rc<BlockState>> = self.approx_placeable.iter().take(9).cloned().collect();
+        let mut goal = core.with_calc_hooks(game, Some(dyn_hooks.clone()), |calc, ctx, s| self.assemble(calc, ctx, s, &hooks, &valid_settings, &hotbar, false));
+        if goal.is_none() {
+            // We're far away, so assume that we have our whole inventory to recalculate placeable properly.
+            let all = self.approx_placeable.clone();
+            let mut missing_report = Vec::new();
+            goal = core.with_calc_hooks(game, Some(dyn_hooks.clone()), |calc, ctx, s| self.assemble_log(calc, ctx, s, &hooks, &valid_settings, &all, &mut missing_report));
+            for line in missing_report {
+                core.say(game, &line);
+            }
+            if goal.is_none() {
+                let height = self.real_schematic.as_ref().map_or(self.stop_at_height, |r| r.height_y());
+                if core.settings.flag("skipFailedLayers") && build_in_layers && self.layer * layer_height < height {
+                    core.say(game, &format!("Skipping layer that I cannot construct! Layer #{}", self.layer));
+                    self.layer += 1;
+                    return self.tick(core, game, calc_failed, is_safe_to_cancel, recursions + 1);
+                }
+                core.say(game, "Unable to do it. Pausing. resume to resume, cancel to cancel");
+                self.paused = true;
+                return PathingCommand::RequestPause;
+            }
+        }
+        core.path_hooks = Some(dyn_hooks);
+        match goal {
+            Some(g) => PathingCommand::ForceRevalidateGoalAndPath(g),
+            None => PathingCommand::RequestPause,
+        }
     }
 
-    /// Whether a block put at `pos` would have something to be put against.
-    fn supported(terrain: &mut dyn Terrain, pos: Pos) -> Vec<([i32; 3], Pos)> {
-        // Under it first: the way a player builds up.
-        [[0, -1, 0], [-1, 0, 0], [1, 0, 0], [0, 0, -1], [0, 0, 1], [0, 1, 0]]
-            .into_iter()
-            .filter_map(|d| {
-                let s = [pos[0] + d[0], pos[1] + d[1], pos[2] + d[2]];
-                (terrain.cell(s) == Cell::Solid).then_some(([-d[0], -d[1], -d[2]], s))
-            })
-            .collect()
+    // ---- what is wrong
+
+    fn recalc(&mut self, calc: &CalculationContext, ctx: &dyn PlayerContext, s: &super::baritone_settings::Settings, hooks: &BuilderHooks, vs: &ValidSettings) -> bool {
+        if self.incorrect_positions.is_none() {
+            self.incorrect_positions = Some(HashSet::new());
+            self.full_recalc(calc, s, hooks, vs);
+            if self.incorrect_positions.as_ref().is_none_or(HashSet::is_empty) {
+                return false;
+            }
+        }
+        self.recalc_nearby(calc, ctx, s, hooks, vs);
+        if self.incorrect_positions.as_ref().is_none_or(HashSet::is_empty) {
+            self.full_recalc(calc, s, hooks, vs);
+        }
+        self.incorrect_positions.as_ref().is_some_and(|p| !p.is_empty())
+    }
+
+    fn trim(&mut self, core: &mut Core, game: &Game<'_>) {
+        let Some(me) = game.player.as_ref().map(|p| super::baritone_utils::feet_of([p.position.x, p.position.y, p.position.z])) else { return };
+        let _ = core;
+        if let Some(set) = &self.incorrect_positions {
+            let copy: HashSet<Pos> = set.iter().copied().filter(|p| dist_sq(*p, me) <= 200).collect();
+            if !copy.is_empty() {
+                self.incorrect_positions = Some(copy);
+            }
+        }
+    }
+
+    fn recalc_nearby(&mut self, calc: &CalculationContext, ctx: &dyn PlayerContext, s: &super::baritone_settings::Settings, hooks: &BuilderHooks, vs: &ValidSettings) {
+        let center = ctx.player_feet();
+        let radius = s.int("builderTickScanRadius") as i32;
+        let Some(incorrect) = self.incorrect_positions.as_mut() else { return };
+        for dx in -radius..=radius {
+            for dy in -radius..=radius {
+                for dz in -radius..=radius {
+                    let (x, y, z) = (center[0] + dx, center[1] + dy, center[2] + dz);
+                    let current = calc.bsi.get0(x, y, z);
+                    if let Some(desired) = hooks.get_schematic(x, y, z, &current) {
+                        // We care about this position.
+                        let pos = [x, y, z];
+                        if valid(&current, Some(&desired), false, vs) {
+                            incorrect.remove(&pos);
+                            self.observed_completed.insert(pos);
+                        } else {
+                            incorrect.insert(pos);
+                            self.observed_completed.remove(&pos);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn full_recalc(&mut self, calc: &CalculationContext, s: &super::baritone_settings::Settings, hooks: &BuilderHooks, vs: &ValidSettings) {
+        let mut incorrect = HashSet::new();
+        let limit = s.int("incorrectSize").max(0) as usize;
+        let Some(schematic) = self.schematic.clone() else { return };
+        'all: for y in 0..schematic.height_y() {
+            for z in 0..schematic.length_z() {
+                for x in 0..schematic.width_x() {
+                    let (bx, by, bz) = (x + self.origin[0], y + self.origin[1], z + self.origin[2]);
+                    let current = calc.bsi.get0(bx, by, bz);
+                    if !schematic.in_schematic(x, y, z, &current) {
+                        continue;
+                    }
+                    let pos = [bx, by, bz];
+                    if calc.bsi.world_contains_loaded_chunk(bx, bz) {
+                        // Check if it's in render distance, not if it's in cache: we can directly observe this block.
+                        let desired = schematic.desired_state(x, y, z, &current, &self.approx_placeable);
+                        if valid(&current, Some(&desired), false, vs) {
+                            self.observed_completed.insert(pos);
+                        } else {
+                            incorrect.insert(pos);
+                            self.observed_completed.remove(&pos);
+                            if incorrect.len() > limit {
+                                break 'all;
+                            }
+                        }
+                        continue;
+                    }
+                    // This is not in render distance.
+                    if !self.observed_completed.contains(&pos) {
+                        // And we've never seen this position be correct, therefore mark as incorrect.
+                        incorrect.insert(pos);
+                        if incorrect.len() > limit {
+                            break 'all;
+                        }
+                    }
+                }
+            }
+        }
+        let _ = hooks;
+        self.incorrect_positions = Some(incorrect);
+    }
+
+    // ---- breaking
+
+    fn to_break_near_player(&self, calc: &CalculationContext, ctx: &dyn PlayerContext, s: &super::baritone_settings::Settings, hooks: &BuilderHooks, vs: &ValidSettings) -> Option<(Pos, Rotation)> {
+        let center = ctx.player_feet();
+        let path_start = self.expected_start;
+        let from_above = s.flag("breakFromAbove");
+        for dx in -5..=5 {
+            for dy in (if from_above { -1 } else { 0 })..=5 {
+                for dz in -5..=5 {
+                    let (x, y, z) = (center[0] + dx, center[1] + dy, center[2] + dz);
+                    if dy == -1 && x == path_start[0] && z == path_start[2] {
+                        continue; // don't mine what we're supported by, but not directly standing on
+                    }
+                    let curr = calc.bsi.get0(x, y, z);
+                    let Some(desired) = hooks.get_schematic(x, y, z, &curr) else { continue };
+                    if !curr.is_air() && !(curr.is_block("water") || curr.is_block("lava")) && !valid(&curr, Some(&desired), false, vs) {
+                        let pos = [x, y, z];
+                        if let Some(rot) = ctx.reachable(pos, ctx.block_reach_distance(), false) {
+                            return Some((pos, rot));
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    // ---- placing
+
+    fn search_for_placables(&self, calc: &CalculationContext, ctx: &dyn PlayerContext, _s: &super::baritone_settings::Settings, hooks: &BuilderHooks, vs: &ValidSettings, desirable_on_hotbar: &mut Vec<Rc<BlockState>>) -> Option<Placement> {
+        let center = ctx.player_feet();
+        for dx in -5..=5 {
+            for dy in -5..=1 {
+                for dz in -5..=5 {
+                    let (x, y, z) = (center[0] + dx, center[1] + dy, center[2] + dz);
+                    let curr = calc.bsi.get0(x, y, z);
+                    let Some(desired) = hooks.get_schematic(x, y, z, &curr) else { continue };
+                    if mh::is_replaceable(x, y, z, &curr, calc.bsi) && !valid(&curr, Some(&desired), false, vs) {
+                        if dy == 1 && calc.bsi.get0(x, y + 1, z).is_air() {
+                            continue;
+                        }
+                        desirable_on_hotbar.push(desired.clone());
+                        if let Some(placement) = self.possible_to_place(calc, ctx, &desired, [x, y, z], vs) {
+                            return Some(placement);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn possible_to_place(&self, calc: &CalculationContext, ctx: &dyn PlayerContext, to_place: &BlockState, at: Pos, vs: &ValidSettings) -> Option<Placement> {
+        // These two don't care which face we're placing against, but they were asked for every face.
+        let mut checked_placeable = false;
+        for against in DIRECTIONS {
+            let against_pos = [at[0] + against[0], at[1] + against[1], at[2] + against[2]];
+            let against_state = calc.bsi.get0(against_pos[0], against_pos[1], against_pos[2]);
+            if mh::is_replaceable(against_pos[0], against_pos[1], against_pos[2], &against_state, calc.bsi) {
+                continue;
+            }
+            if !checked_placeable {
+                if !ctx.can_survive(at, to_place) || !ctx.placement_plausible(at, to_place) {
+                    return None;
+                }
+                checked_placeable = true;
+            }
+            let Some(bounds) = ctx.shape_bounds(against_pos) else { continue };
+            for m in aabb_side_multipliers(against) {
+                let px = f64::from(against_pos[0]) + bounds[0] * m[0] + bounds[3] * (1.0 - m[0]);
+                let py = f64::from(against_pos[1]) + bounds[1] * m[1] + bounds[4] * (1.0 - m[1]);
+                let pz = f64::from(against_pos[2]) + bounds[2] * m[2] + bounds[5] * (1.0 - m[2]);
+                let rot = calc_rotation_from_vec3d(ctx.infer_sneaking_eye_position(), [px, py, pz], ctx.player_rotations());
+                let actual = ctx.peek_rotation(rot);
+                let opposite = [-against[0], -against[1], -against[2]];
+                if let Some((hit, face)) = ctx.ray_trace_towards(actual, ctx.block_reach_distance(), true) {
+                    if hit == against_pos && face == opposite {
+                        if let Some(slot) = self.has_any_item_that_would_place(ctx, to_place, against_pos, face, [px, py, pz], actual, vs) {
+                            return Some(Placement { hotbar_selection: slot, place_against: against_pos, side: opposite, rot });
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn has_any_item_that_would_place(&self, ctx: &dyn PlayerContext, desired: &BlockState, clicked: Pos, face: [i32; 3], hit: [f64; 3], rot: Rotation, vs: &ValidSettings) -> Option<usize> {
+        for slot in 0..9 {
+            // The state depends on the facing of the player sometimes.
+            let Some(would_be_placed) = ctx.would_place(slot, clicked, face, hit, rot) else { continue };
+            if valid(&would_be_placed, Some(desired), true, vs) {
+                return Some(slot);
+            }
+        }
+        None
+    }
+
+    // ---- the goal
+
+    #[allow(clippy::too_many_arguments)]
+    fn assemble(&mut self, calc: &CalculationContext, ctx: &dyn PlayerContext, s: &super::baritone_settings::Settings, hooks: &BuilderHooks, vs: &ValidSettings, approx_placeable: &[Rc<BlockState>], _log: bool) -> Option<GoalRef> {
+        let mut sink = Vec::new();
+        self.assemble_log(calc, ctx, s, hooks, vs, approx_placeable, &mut sink)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn assemble_log(&mut self, calc: &CalculationContext, ctx: &dyn PlayerContext, s: &super::baritone_settings::Settings, hooks: &BuilderHooks, vs: &ValidSettings, approx_placeable: &[Rc<BlockState>], report: &mut Vec<String>) -> Option<GoalRef> {
+        let log_missing = approx_placeable.len() > 9;
+        let mut placeable: Vec<Pos> = Vec::new();
+        let mut breakable: Vec<Pos> = Vec::new();
+        let mut source_liquids: Vec<Pos> = Vec::new();
+        let mut flowing_liquids: Vec<Pos> = Vec::new();
+        let mut missing: Vec<(Rc<BlockState>, u32)> = Vec::new();
+        let mut out_of_bounds: Vec<Pos> = Vec::new();
+        let positions: Vec<Pos> = self.incorrect_positions.iter().flatten().copied().collect();
+        for pos in positions {
+            let state = calc.bsi.get0(pos[0], pos[1], pos[2]);
+            if state.is_air() {
+                match hooks.get_schematic(pos[0], pos[1], pos[2], &state) {
+                    None => out_of_bounds.push(pos),
+                    Some(desired) => {
+                        if contains_blockstate(approx_placeable, &desired, vs) {
+                            placeable.push(pos);
+                        } else if let Some(entry) = missing.iter_mut().find(|(m, _)| m.name == desired.name && m.props == desired.props) {
+                            entry.1 += 1;
+                        } else {
+                            missing.push((desired, 1));
+                        }
+                    }
+                }
+            } else if state.is(Class::Liquid) {
+                // If the block itself is JUST a liquid (i.e. not just a waterlogged block), we CANNOT break it.
+                if !mh::possibly_flowing(&state) {
+                    // If it's a source block then we want to replace it with a throwaway.
+                    source_liquids.push(pos);
+                } else {
+                    flowing_liquids.push(pos);
+                }
+            } else {
+                breakable.push(pos);
+            }
+        }
+        if let Some(set) = self.incorrect_positions.as_mut() {
+            for p in &out_of_bounds {
+                set.remove(p);
+            }
+        }
+        let to_break: Vec<GoalRef> = breakable.iter().map(|p| self.break_goal(calc, s, *p)).collect();
+        let placeable_set: HashSet<Pos> = placeable.iter().copied().collect();
+        let mut to_place: Vec<GoalRef> = Vec::new();
+        for pos in &placeable {
+            let below = [pos[0], pos[1] - 1, pos[2]];
+            let below2 = [pos[0], pos[1] - 2, pos[2]];
+            if !placeable_set.contains(&below) && !placeable_set.contains(&below2) {
+                to_place.push(self.placement_goal(calc, ctx, hooks, *pos));
+            }
+        }
+        for pos in &source_liquids {
+            to_place.push(rc(GoalBlock([pos[0], pos[1] + 1, pos[2]])));
+        }
+        if !to_place.is_empty() {
+            return Some(rc(JankyGoalComposite { primary: rc(GoalComposite(to_place)), fallback: rc(GoalComposite(to_break)) }));
+        }
+        if to_break.is_empty() {
+            if log_missing && !missing.is_empty() {
+                report.push("Missing materials for at least:".to_owned());
+                report.push(missing.iter().map(|(state, n)| format!("{n}x {}", state_label(state))).collect::<Vec<_>>().join("\n"));
+            }
+            if log_missing && !flowing_liquids.is_empty() {
+                report.push("Unreplaceable liquids at at least:".to_owned());
+                report.push(flowing_liquids.iter().map(|p| format!("{} {} {}", p[0], p[1], p[2])).collect::<Vec<_>>().join("\n"));
+            }
+            return None;
+        }
+        Some(rc(GoalComposite(to_break)))
+    }
+
+    fn placement_goal(&self, calc: &CalculationContext, ctx: &dyn PlayerContext, hooks: &BuilderHooks, pos: Pos) -> GoalRef {
+        let current = calc.bsi.get0(pos[0], pos[1], pos[2]);
+        if !current.is_air() {
+            // TODO can this even happen?
+            return rc(GoalPlace::new(pos));
+        }
+        let allow_same_level = !calc.bsi.get0(pos[0], pos[1] + 1, pos[2]).is_air();
+        for (dx, dy, dz) in mh::HORIZONTALS_BUT_ALSO_DOWN {
+            let against = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
+            if let Some(desired) = hooks.get_schematic(pos[0], pos[1], pos[2], &current) {
+                if mh::can_place_against(calc, against[0], against[1], against[2]) && ctx.placement_plausible(pos, &desired) {
+                    return rc(GoalAdjacent::new(pos, against, allow_same_level));
+                }
+            }
+        }
+        rc(GoalPlace::new(pos))
+    }
+
+    fn break_goal(&self, calc: &CalculationContext, s: &super::baritone_settings::Settings, pos: Pos) -> GoalRef {
+        let above = [pos[0], pos[1] + 1, pos[2]];
+        if s.flag("goalBreakFromAbove") && calc.bsi.get0(above[0], above[1], above[2]).is_air() && calc.bsi.get0(above[0], above[1] + 1, above[2]).is_air() {
+            return rc(JankyGoalComposite { primary: rc(GoalBreak(pos)), fallback: rc(GoalBreakFromAbove(above)) });
+        }
+        rc(GoalBreak(pos))
+    }
+}
+
+fn state_label(state: &BlockState) -> String {
+    if state.props.is_empty() {
+        format!("Block{{{}}}", state.name)
+    } else {
+        format!("Block{{{}}}[{}]", state.name, state.props.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(","))
+    }
+}
+
+/// `aabbSideMultipliers`: where on the face of the block placed against to aim.
+fn aabb_side_multipliers(side: [i32; 3]) -> Vec<[f64; 3]> {
+    match side {
+        [0, 1, 0] => vec![[0.5, 1.0, 0.5], [0.1, 1.0, 0.5], [0.9, 1.0, 0.5], [0.5, 1.0, 0.1], [0.5, 1.0, 0.9]],
+        [0, -1, 0] => vec![[0.5, 0.0, 0.5], [0.1, 0.0, 0.5], [0.9, 0.0, 0.5], [0.5, 0.0, 0.1], [0.5, 0.0, 0.9]],
+        _ => {
+            let x = if side[0] == 0 { 0.5 } else { f64::from(1 + side[0]) / 2.0 };
+            let z = if side[2] == 0 { 0.5 } else { f64::from(1 + side[2]) / 2.0 };
+            vec![[x, 0.25, z], [x, 0.75, z]]
+        }
     }
 }
 
 impl Process for BuilderProcess {
     fn name(&self) -> &'static str {
-        "build"
+        "builder"
     }
 
     fn display(&self) -> String {
-        format!("Building {}: {} blocks to go, {} placed, {} broken", self.name, self.wrong.len(), self.placed, self.broken)
+        if self.paused {
+            "Builder Paused".to_owned()
+        } else {
+            format!("Building {}", self.name.as_deref().unwrap_or("null"))
+        }
     }
 
     fn is_active(&self) -> bool {
-        self.active
+        self.schematic.is_some()
     }
 
     fn priority(&self) -> f64 {
-        0.1
+        0.0
     }
 
-    fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, _calc_failed: bool, _safe: bool) -> PathingCommand {
-        let tick = game.ticks;
-        let Some(feet) = core.player_feet(game) else {
-            return PathingCommand::Defer;
-        };
-        for (pos, _) in std::mem::take(&mut core.dig.broken) {
-            self.broken += 1;
-            self.tries.remove(&pos);
-        }
-        if tick >= self.next_scan {
-            self.next_scan = tick + 20;
-            self.scan(core, game);
-            self.missing.clear();
-        }
-        // Already right: drop it from the list at once rather than at the next scan.
-        let sch = self.schematic.clone();
-        if let Some(sch) = &sch {
-            let origin = self.origin;
-            let mut kept = Vec::with_capacity(self.wrong.len());
-            for mut w in std::mem::take(&mut self.wrong) {
-                let rel = [w.pos[0] - origin[0], w.pos[1] - origin[1], w.pos[2] - origin[2]];
-                let name = block_name(game, w.pos);
-                let is_air = game.res.facts().is_air(game.world.block(w.pos[0], w.pos[1], w.pos[2]));
-                match (&w.need, sch.desired(rel, &name)) {
-                    (Need::Break, Some(spec)) if spec.is_air() => {
-                        if is_air {
-                            continue;
-                        }
-                    }
-                    (Need::Break, Some(spec)) => {
-                        if name == spec.name {
-                            continue;
-                        }
-                        if is_air {
-                            w.need = Need::Place(spec);
-                        }
-                    }
-                    (Need::Place(spec), _) => {
-                        if name == spec.name {
-                            continue;
-                        }
-                    }
-                    _ => continue,
-                }
-                kept.push(w);
-            }
-            self.wrong = kept;
-        }
-        if self.wrong.is_empty() {
-            core.say_green(
-                game,
-                &format!("Finished building {}: {} placed, {} broken.", self.name, self.placed, self.broken),
-            );
-            self.active = false;
-            return PathingCommand::CancelAndSetGoal(rc(super::baritone_goals::GoalBlock(feet)));
-        }
-
-        // The wrong block to work on: breaks and placements both, the lowest layer first, nearest first.
-        let top_down = core.settings.flag("layerOrder");
-        let mut order: Vec<usize> = (0..self.wrong.len()).collect();
-        order.sort_by_key(|&i| {
-            let w = &self.wrong[i];
-            (if !self.layered { 0 } else if top_down { -w.pos[1] } else { w.pos[1] }, dist_sq(w.pos, feet))
-        });
-        let mut choice: Option<(usize, Vec<([i32; 3], Pos)>, usize, Option<Pos>)> = None;
-        let mut buried: Option<(usize, Vec<([i32; 3], Pos)>, usize, Option<Pos>)> = None;
-        {
-            let g = &*game;
-            let mut terrain = GameTerrain::new(g, &mut core.cells, &core.avoid_breaking, true);
-            for &i in order.iter().take(60) {
-                let w = &self.wrong[i];
-                match &w.need {
-                    Need::Break => {
-                        if exposed(&mut terrain, w.pos, false) {
-                            choice = Some((i, Vec::new(), usize::MAX, None));
-                            break;
-                        }
-                        buried.get_or_insert((i, Vec::new(), usize::MAX, None));
-                    }
-                    Need::Place(spec) => {
-                        let item = item_for_block(&spec.name);
-                        let Some(slot) = hotbar_slot(g, |n| n == item) else {
-                            *self.missing.entry(item).or_insert(0) += 1;
-                            continue;
-                        };
-                        let faces = Self::supported(&mut terrain, w.pos);
-                        if !faces.is_empty() {
-                            choice = Some((i, faces, slot, None));
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        let Some((index, faces, slot, dig_at)) = choice.or(buried) else {
-            // Nothing can be done yet: blocks floating in the air, or materials missing.
-            if !self.missing.is_empty() && !self.told_missing {
-                self.told_missing = true;
-                self.paused = true;
-                let list: Vec<String> = self.missing.keys().map(|k| k.trim_start_matches("minecraft:").to_owned()).collect();
-                core.say_red(game, &format!("Missing materials in the hotbar: {}. Put them there and I will go on.", list.join(", ")));
-            }
-            return PathingCommand::Defer;
-        };
-        self.told_missing = false;
-        self.paused = false;
-        let target = dig_at.unwrap_or(self.wrong[index].pos);
-        let reach = ReachGoal { target };
-        // In reach: act.
-        if reach.is_in_goal(feet) && core.dig.active.is_none() && !core.user_paused {
-            match &self.wrong[index].need {
-                Need::Break => {
-                    let n = self.tries.entry(target).or_insert(0);
-                    *n += 1;
-                    if game.res.facts().is_air(game.world.block(target[0], target[1], target[2])) {
-                        self.tries.remove(&target);
-                        if dig_at.is_none() {
-                            self.wrong.remove(index);
-                        }
-                    } else if *n > 4 || !core.start_dig(game, target) {
-                        self.blacklist.insert(target, tick + 2000);
-                        self.tries.remove(&target);
-                        let name = block_name(game, target);
-                        core.say_red(game, &format!("I cannot break {} at {}, {}, {}: skipping it.", name.trim_start_matches("minecraft:"), target[0], target[1], target[2]));
-                    }
-                }
-                Need::Place(_) => {
-                    // Only a click that is made counts: waiting for the game's use delay is not a try.
-                    if core.click_ready(game) {
-                        inv::select(game, slot);
-                        let n = self.tries.entry(target).or_insert(0);
-                        if faces.iter().any(|(face, support)| core.click_block(game, *support, *face)) {
-                            self.placed += 1;
-                            *n += 1;
-                        } else {
-                            *n += 2;
-                        }
-                        // Clicked six times and it is still not there, or could not be aimed at.
-                        if *n > 10 {
-                            self.blacklist.insert(target, tick + 400);
-                            self.tries.remove(&target);
-                            let why = std::mem::take(&mut core.dig.aim_error);
-                            core.say_red(game, &format!("A block would not go down at {}, {}, {}: skipping it for now. {why}", target[0], target[1], target[2]));
-                        }
-                    }
-                }
-            }
-        }
-        PathingCommand::RevalidateGoalAndPath(rc(reach))
+    fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, calc_failed: bool, safe_to_cancel: bool) -> PathingCommand {
+        self.expected_start = core.pathing.expected_segment_start();
+        self.tick(core, game, calc_failed, safe_to_cancel, 0)
     }
 
-    fn on_lost_control(&mut self, _core: &mut Core, _game: &mut Game<'_>) {}
+    fn on_lost_control(&mut self, core: &mut Core, _game: &mut Game<'_>) {
+        self.on_lost_control_inner(core);
+    }
 
     fn cancel(&mut self) {
-        self.active = false;
+        self.incorrect_positions = None;
+        self.name = None;
+        self.schematic = None;
+        self.real_schematic = None;
+        self.layer = 0;
+        self.num_repeats = 0;
+        self.paused = false;
+        self.observed_completed = HashSet::new();
     }
-}
-
-/// How many of an item the inventory holds, for the build's report.
-pub fn have(game: &Game<'_>, item: &str) -> u32 {
-    count_items(game, |n| n == item)
 }

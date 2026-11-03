@@ -296,8 +296,7 @@ fn version(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandRes
 
 fn repack(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     args.require_max(0)?;
-    let n = b.core.cache.explored.len();
-    b.core.cache.forget();
+    let n = b.core.world_data.repack(game, 40);
     b.core.cells.clear();
     b.core.say(game, &format!("Queued {n} chunks for repacking"));
     Ok(())
@@ -318,9 +317,7 @@ fn render(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
 
 fn reload_all(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     args.require_max(0)?;
-    b.core.settings = settings::Settings::load(|n| game.native_setting(ID, n));
-    b.core.refresh();
-    b.core.waypoints = Waypoints::from_text(&game.native_setting(ID, "waypoints").unwrap_or_default());
+    b.core.world_data.reload_all();
     b.core.say(game, "Reloaded");
     Ok(())
 }
@@ -329,6 +326,8 @@ fn save_all(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandRe
     args.require_max(0)?;
     save_settings(b, game);
     b.core.save_waypoints(game);
+    let Baritone { core, .. } = b;
+    core.world_data.save(game, &core.settings);
     b.core.say(game, "Saved");
     Ok(())
 }

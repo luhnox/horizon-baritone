@@ -79,6 +79,9 @@ pub trait PlayerContext {
     fn would_place(&self, slot: usize, clicked: Pos, face: [i32; 3], hit: [f64; 3], rotation: Rotation) -> Option<std::rc::Rc<super::baritone_block_state::BlockState>>;
     /// `BuilderProcess.approxPlaceable`: what the first `size` slots would place at the feet (air for no block).
     fn approx_placeable(&self, size: usize) -> Vec<std::rc::Rc<super::baritone_block_state::BlockState>>;
+    /// The bounds of the shape of the block at a position, relative to the block: min x, y, z then max x, y, z;
+    /// None for an empty shape (`state.getShape(world, pos).bounds()`).
+    fn shape_bounds(&self, pos: Pos) -> Option<[f64; 6]>;
     /// `BlockState.canSurvive(world, pos)`.
     fn can_survive(&self, pos: Pos, state: &super::baritone_block_state::BlockState) -> bool;
     /// `BuilderProcess.placementPlausible`: no entity stands where a solid block would go.

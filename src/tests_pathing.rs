@@ -427,6 +427,24 @@ mod paper {
         fn falling_block_near(&self, _pos: Pos) -> bool {
             false
         }
+        fn state_for_placement(&self, _slot: usize, _clicked: Pos, _face: [i32; 3], _hit: [f64; 3], _rotation: Rotation) -> Option<Rc<BlockState>> {
+            None
+        }
+        fn would_place(&self, _slot: usize, _clicked: Pos, _face: [i32; 3], _hit: [f64; 3], _rotation: Rotation) -> Option<Rc<BlockState>> {
+            None
+        }
+        fn approx_placeable(&self, size: usize) -> Vec<Rc<BlockState>> {
+            vec![self.world.air.clone(); size]
+        }
+        fn shape_bounds(&self, _pos: Pos) -> Option<[f64; 6]> {
+            Some([0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+        }
+        fn can_survive(&self, _pos: Pos, _state: &BlockState) -> bool {
+            true
+        }
+        fn placement_plausible(&self, _pos: Pos, _state: &BlockState) -> bool {
+            true
+        }
         fn mobs_to_avoid(&self) -> Vec<Pos> {
             Vec::new()
         }

@@ -35,7 +35,7 @@ use std::{
 };
 
 pub const ID: &str = "baritone";
-pub const VERSION: &str = "1.1.3";
+pub const VERSION: &str = "1.1.5";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -57,8 +57,10 @@ pub struct Core {
     pub pathing: PathingBehavior,
     /// LookBehavior's aim processor: the noise and the mouse steps of every aim.
     pub aim: AimProcessor,
+    /// The cached world of the world and dimension being played in.
+    pub world_data: super::baritone_world_data::WorldProvider,
     /// The game's block states as the pathfinder's, kept between ticks.
-    pub states: super::baritone_state_factory::StateFactory,
+    pub states: std::rc::Rc<super::baritone_state_factory::StateFactory>,
     /// What the process asking for a path overrides of the calculation context (PathingCommandContext).
     pub path_hooks: Option<std::rc::Rc<dyn super::baritone_calculation_context::CostHooks>>,
     pub dig: DigState,
@@ -91,7 +93,8 @@ impl Core {
             input: Input::default(),
             pathing: PathingBehavior::new(),
             aim: AimProcessor::new(super::baritone_command::now_ms()),
-            states: super::baritone_state_factory::StateFactory::new(game),
+            world_data: Default::default(),
+            states: std::rc::Rc::new(super::baritone_state_factory::StateFactory::new(game)),
             path_hooks: None,
             dig: DigState::default(),
             cache: WorldCache::default(),
@@ -386,6 +389,7 @@ impl Baritone {
             return;
         }
         self.core.cache.note_chunks(game);
+        self.core.cache_tick(game);
         self.track_death(game);
         let allow_servers = self.core.settings.flag("allowOnServers");
         if on_server(game) && !allow_servers {
@@ -539,6 +543,9 @@ pub fn stop(game: &mut Game<'_>) {
         if b.procs.any_active() || b.core.pathing_busy() {
             b.cancel_everything(game);
         }
+        // The cached world goes to disk when the game stops.
+        let Baritone { core, .. } = b;
+        core.world_data.save(game, &core.settings);
     });
     horizon_client::gizmos::baritone_lines::set(Vec::new());
 }

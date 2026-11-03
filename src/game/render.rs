@@ -78,7 +78,8 @@ pub fn lines(b: &Baritone, game: &Game<'_>, out: &mut Vec<Line>) {
         for p in b.procs.mine.targets().iter().take(12) {
             cube(&mut g, *p, mine_color, 2.5);
         }
-        for (p, breaking) in b.procs.build.wrong_positions() {
+        for p in b.procs.build.incorrect().take(200) {
+            let breaking = !is_air_at(game, p);
             let color = if breaking { break_color } else { place_color };
             cube(&mut g, p, color, 1.5);
         }

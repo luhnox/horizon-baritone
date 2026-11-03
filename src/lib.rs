@@ -15,6 +15,8 @@ pub mod baritone_bom;
 pub mod baritone_world_scanner;
 #[path = "process/builder_logic.rs"]
 pub mod baritone_builder_logic;
+#[path = "cache/cached_world.rs"]
+pub mod baritone_cached_world;
 #[path = "api/settings.rs"]
 pub mod baritone_settings;
 #[path = "selection/selection.rs"]

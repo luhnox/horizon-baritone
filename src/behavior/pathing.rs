@@ -60,9 +60,26 @@ impl Core {
 
     /// Run `f` with the pathing behavior and the game as the player it walks.
     pub fn drive<R>(&mut self, game: &mut Game<'_>, f: impl FnOnce(&mut PathingBehavior, &GameCtx<'_, '_>, &Settings) -> R) -> R {
-        let Core { pathing, input, settings, throwaway, aim, states, .. } = self;
-        let ctx = GameCtx::new(game, input, settings, throwaway, aim, states);
+        let Core { pathing, input, settings, throwaway, aim, states, world_data, .. } = self;
+        let ctx = GameCtx::new(game, input, settings, throwaway, aim, states, world_data.current.as_ref().map(|d| &d.cache));
         f(pathing, &ctx, settings)
+    }
+
+    /// WorldProvider and the chunk packer, once a tick: follow the world and dimension, queue the chunks that
+    /// loaded, pack as many as there is time for, and save now and then.
+    pub fn cache_tick(&mut self, game: &mut Game<'_>) {
+        self.world_data.follow(game, &self.settings);
+        if !self.settings.flag("chunkCaching") {
+            return;
+        }
+        self.world_data.queue_chunks(game);
+        let batch = self.world_data.take_batch(game, 4);
+        if !batch.is_empty() {
+            let factory = self.states.clone();
+            let (done, left) = self.with_calc(game, |calc, ctx, _| ctx.with_game(|g| super::baritone_world_data::WorldProvider::pack_batch(g, calc, &factory, batch, 4)));
+            self.world_data.finish_batch(done, left);
+        }
+        self.world_data.save_if_due(game, &self.settings);
     }
 
     /// Run `f` with a CalculationContext made now (`new CalculationContext(baritone)`).

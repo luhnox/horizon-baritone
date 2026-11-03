@@ -15,11 +15,12 @@ pub struct StateFactory {
     res: Arc<Resources>,
     registry: &'static BlockRegistry,
     cache: RefCell<HashMap<u32, Rc<BlockState>>>,
+    by_name: RefCell<HashMap<String, Option<Rc<BlockState>>>>,
 }
 
 impl StateFactory {
     pub fn new(game: &Game<'_>) -> Self {
-        Self { res: game.res.clone(), registry: game.pack.assets.registry, cache: RefCell::new(HashMap::new()) }
+        Self { res: game.res.clone(), registry: game.pack.assets.registry, cache: RefCell::new(HashMap::new()), by_name: RefCell::new(HashMap::new()) }
     }
 
     /// The state with this id.
@@ -33,10 +34,21 @@ impl StateFactory {
         built
     }
 
+    /// The default state of the block with this name (`minecraft:stone`, or bare `stone`), remembered.
+    pub fn default_state_of(&self, name: &str) -> Option<Rc<BlockState>> {
+        if let Some(s) = self.by_name.borrow().get(name) {
+            return s.clone();
+        }
+        let full = if name.contains(':') { name.to_owned() } else { format!("minecraft:{name}") };
+        let state = self.registry.default_state(&full).map(|id| self.state(id));
+        self.by_name.borrow_mut().insert(name.to_owned(), state.clone());
+        state
+    }
+
     /// The state a block of this name has with the properties given (the others at their defaults), or the
     /// default state when they do not fit.
     pub fn resolve(&self, name: &str, props: &[(String, String)]) -> Option<Rc<BlockState>> {
-        let mut descriptor = horizon_world::registry::BlockState { name: name.into(), properties: Default::default() };
+        let mut descriptor = horizon_world::chunk::BlockState { name: name.into(), properties: Default::default() };
         for (k, v) in props {
             descriptor.properties.insert(k.as_str().into(), v.as_str().into());
         }

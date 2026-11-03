@@ -2,6 +2,7 @@
 // Horizon's player, world and inventory into what the ported Baritone code asks for. Block states are
 // built from Horizon's facts once per state id and shared.
 use super::baritone_aim::{AimProcessor, AimSettings};
+use super::baritone_cached_world::CachedWorld;
 use super::baritone_block_state::{BlockState, Class, FluidKind};
 use super::baritone_state_factory::StateFactory;
 use super::baritone_block_state_interface::BlockStateInterface;
@@ -33,11 +34,12 @@ pub struct GameCtx<'a, 'g> {
     aim: &'a AimProcessor,
     aim_settings: AimSettings,
     factory: &'a StateFactory,
+    cache: Option<&'a CachedWorld>,
     tool_ticks: RefCell<HashMap<u32, f64>>,
 }
 
 impl<'a, 'g> GameCtx<'a, 'g> {
-    pub fn new(game: &'a mut Game<'g>, input: &'a mut InputHandler, settings: &'a Settings, throwaway: &'a [String], aim: &'a AimProcessor, factory: &'a StateFactory) -> Self {
+    pub fn new(game: &'a mut Game<'g>, input: &'a mut InputHandler, settings: &'a Settings, throwaway: &'a [String], aim: &'a AimProcessor, factory: &'a StateFactory, cache: Option<&'a CachedWorld>) -> Self {
         let aim_settings = AimSettings::of(settings, f64::from(game.settings.sensitivity));
         Self {
             game: RefCell::new(game),
@@ -47,6 +49,7 @@ impl<'a, 'g> GameCtx<'a, 'g> {
             aim,
             aim_settings,
             factory,
+            cache,
             tool_ticks: RefCell::new(HashMap::new()),
         }
     }
@@ -85,12 +88,15 @@ impl<'a, 'g> GameCtx<'a, 'g> {
 impl BlockStateInterface for GameCtx<'_, '_> {
     fn get0(&self, x: i32, y: i32, z: i32) -> Rc<BlockState> {
         let g = self.game.borrow();
-        let id = if y < horizon_client::chunk::MIN_Y || y >= horizon_client::chunk::MIN_Y + horizon_client::chunk::HEIGHT || !loaded(&g, [x, y, z]) {
-            g.res.facts().air
-        } else {
-            g.world.block(x, y, z)
-        };
-        self.factory.state(id)
+        if y < horizon_client::chunk::MIN_Y || y >= horizon_client::chunk::MIN_Y + horizon_client::chunk::HEIGHT {
+            return self.factory.state(g.res.facts().air);
+        }
+        if !loaded(&g, [x, y, z]) {
+            // A chunk that is not loaded is what the cached world remembers of it, air where it remembers nothing.
+            let remembered = self.cache.and_then(|c| c.get_block(x, y, z)).and_then(|name| self.factory.default_state_of(&name));
+            return remembered.unwrap_or_else(|| self.factory.state(g.res.facts().air));
+        }
+        self.factory.state(g.world.block(x, y, z))
     }
 
     fn is_loaded(&self, x: i32, z: i32) -> bool {
@@ -386,6 +392,17 @@ impl PlayerContext for GameCtx<'_, '_> {
         (0..size).map(|slot| self.state_for_placement(slot, feet, [0, 1, 0], p, rotation).unwrap_or_else(|| air.clone())).collect()
     }
 
+    fn shape_bounds(&self, pos: Pos) -> Option<[f64; 6]> {
+        let g = self.game.borrow();
+        let id = g.world.block(pos[0], pos[1], pos[2]);
+        match g.res.collision().cached_shapes().cached_shape(id) {
+            Ok(Some(shape)) if !shape.is_empty() => Some([shape.min(Axis::X), shape.min(Axis::Y), shape.min(Axis::Z), shape.max(Axis::X), shape.max(Axis::Y), shape.max(Axis::Z)]),
+            Ok(Some(_)) => None,
+            // A shape that depends on its neighbours: a whole block is the guess.
+            _ => Some([0.0, 0.0, 0.0, 1.0, 1.0, 1.0]),
+        }
+    }
+
     fn can_survive(&self, pos: Pos, state: &BlockState) -> bool {
         self.game.borrow_mut().with_level(|b, level, ticks| b.can_survive(level, ticks, BlockPos::new(pos[0], pos[1], pos[2]), BlockStateId(state.id as _)))
     }
@@ -480,6 +497,17 @@ impl PlayerContext for GameCtx<'_, '_> {
 }
 
 impl GameCtx<'_, '_> {
+    /// Run `f` with the game.
+    pub fn with_game<R>(&self, f: impl FnOnce(&Game<'_>) -> R) -> R {
+        f(&self.game.borrow())
+    }
+
+    /// Air.
+    pub fn air_state(&self) -> Rc<BlockState> {
+        let id = self.game.borrow().res.facts().air;
+        self.factory.state(id)
+    }
+
     /// A state of the game as the pathfinder's BlockState, from the cache the reads share.
     pub fn rc_state(&self, id: BlockStateId) -> Rc<BlockState> {
         self.factory.state(id)
@@ -511,7 +539,7 @@ impl GameCtx<'_, '_> {
             item: stack.item.to_string(),
             can_use_game_master_blocks: false,
         };
-        let block = g.behaviours().block(state);
+        let block = g.res.behaviours().block(state);
         Some((context, block))
     }
 
