@@ -6,11 +6,11 @@
 // Where it differs from the Java, on purpose:
 //  * The solver runs on the game thread every tick (the Java's fallback when its solution from the end of the last tick does
 //    not match), not on a thread of its own with a result to reuse.
-//  * No block-change or chunk events reach a mod, so loaded chunks are noticed by the chunk set changing and the ones around
-//    the player are packed again now and then, instead of on each block update.
+//  * A chunk event does not reach a mod, so loaded chunks are noticed by the chunk set changing, and the ones around the player
+//    are packed again now and then in case a chunk was sent again. The blocks the game sets (BlockChangeEvent) do reach it, and
+//    go into the packed chunks at once.
 //  * A position the server set back is noticed by the player not being where the last tick's motion put them.
 //  * Rays that leave the pathfinder's height are taken as clear: there is nothing above the build limit or under bedrock.
-//  * The elytra is not swapped for a fresh one (elytraAutoSwap): that needs a window click.
 use super::baritone::Core;
 use super::baritone_aim::AimSettings;
 use super::baritone_elytra_build_limit::{BuildLimitPathFinder, NetherSearch, SkyProbe};
@@ -312,6 +312,9 @@ pub struct ElytraBehavior {
     pub blocked_lines: Vec<(V3, V3)>,
     notes: Vec<Note>,
     // Packing.
+    /// `invTransactionQueue`: the clicks of swapping a worn-out elytra for a good one, one every ticksBetweenInventoryMoves.
+    inv_queue: VecDeque<usize>,
+    inv_countdown: i32,
     pack_queue: VecDeque<(i32, i32)>,
     pack_seen: HashSet<(i32, i32)>,
     pack_revision: u64,
@@ -369,6 +372,8 @@ impl ElytraBehavior {
             clear_lines: Vec::new(),
             blocked_lines: Vec::new(),
             notes: Vec::new(),
+            inv_queue: VecDeque::new(),
+            inv_countdown: 0,
             pack_queue: VecDeque::new(),
             pack_seen: HashSet::new(),
             pack_revision: u64::MAX,
@@ -590,6 +595,37 @@ impl ElytraBehavior {
         }
     }
 
+    /// `tickInventoryTransactions`.
+    fn tick_inventory_transactions(&mut self, game: &mut Game<'_>, settings: &super::baritone_settings::Settings) {
+        if self.inv_countdown <= 0 {
+            if let Some(slot) = self.inv_queue.pop_front() {
+                super::baritone_inventory::pickup_click(game, slot);
+                self.inv_countdown = settings.int("ticksBetweenInventoryMoves");
+            }
+        }
+        if self.inv_countdown > 0 {
+            self.inv_countdown -= 1;
+        }
+    }
+
+    /// `trySwapElytra`: with elytraAutoSwap, a worn elytra that is nearly gone is traded for one in the inventory that is not.
+    fn try_swap_elytra(&mut self, game: &Game<'_>, settings: &super::baritone_settings::Settings) {
+        if !settings.flag("elytraAutoSwap") || !self.inv_queue.is_empty() {
+            return;
+        }
+        let minimum = settings.int("elytraMinimumDurability");
+        let left = |s: &horizon_client::items::ItemStack| game.res.items().get(&s.item).map_or(0, |i| i.max_damage as i32) - s.damage as i32;
+        let worn_out = game.armor[1].as_ref().is_some_and(|s| &*s.item == "minecraft:elytra" && left(s) <= minimum);
+        if !worn_out {
+            return;
+        }
+        let good = (0..36).find(|&i| game.inventory.get(i).and_then(Option::as_ref).is_some_and(|s| s.count > 0 && &*s.item == "minecraft:elytra" && left(s) > minimum));
+        if let Some(slot) = good {
+            // The chest slot of the armor is 501 in the game's numbering (6 in the menu's).
+            self.inv_queue.extend([slot, 501, slot]);
+        }
+    }
+
     /// `repackChunks`: queue every loaded chunk within 40 of the player.
     pub fn repack_chunks(&mut self, game: &Game<'_>) {
         let Some(p) = game.player.as_ref() else { return };
@@ -619,6 +655,7 @@ impl ElytraBehavior {
     /// `onTick`: the part that runs whenever the process is in control.
     pub fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, flags: ProcessFlags) {
         self.pack_tick(game, super::baritone::take_block_changes());
+        self.tick_inventory_transactions(game, &core.settings);
         let cull_after = (core.settings.int("elytraTimeBetweenCacheCullSecs") * 20) as u64;
         let cull_distance = core.settings.int("elytraCacheCullDistance") as i32;
         let setback_delay = core.settings.int("elytraFireworkSetbackUseDelay") as i32;
@@ -680,6 +717,7 @@ impl ElytraBehavior {
         if self.path_manager.path().is_empty() {
             return;
         }
+        self.try_swap_elytra(game, &core.settings);
         self.landing_mode = flags.landing;
         let age = self.attached_firework_age(game);
         let sensitivity = f64::from(game.settings.sensitivity);

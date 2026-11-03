@@ -281,7 +281,8 @@ impl PlayerContext for GameCtx<'_, '_> {
     }
 
     fn block_reach_distance(&self) -> f64 {
-        self.player(|g| g.bar_reach())
+        // BaritonePlayerController.getBlockReachDistance.
+        if self.player(|g| g.creative) { 5.0 } else { self.settings.float("blockReachDistance") }
     }
 
     fn reachable_offset(&self, pos: Pos, offset: [f64; 3], reach: f64, would_sneak: bool) -> Option<Rotation> {
@@ -350,9 +351,12 @@ impl PlayerContext for GameCtx<'_, '_> {
         self.inventory.borrow_mut().has_generic_throwaway(&mut g, self.settings, self.throwaway)
     }
 
-    fn select_throwaway_for_location(&self, select: bool, _x: i32, _y: i32, _z: i32) -> bool {
+    fn select_throwaway_for_location(&self, select: bool, x: i32, y: i32, z: i32) -> bool {
+        // The block the build wants there, if one is being built (`placeAt`).
+        let place_at = self.inventory.borrow().place_at.clone();
+        let wanted = place_at.and_then(|f| f(x, y, z, &self.get0(x, y, z))).map(|s| s.name.to_string());
         let mut g = self.game.borrow_mut();
-        self.inventory.borrow_mut().select_throwaway_for_location(&mut g, self.settings, self.throwaway, select, None)
+        self.inventory.borrow_mut().select_throwaway_for_location(&mut g, self.settings, self.throwaway, select, wanted.as_deref())
     }
 
     fn switch_to_best_tool_for(&self, pos: Pos) {

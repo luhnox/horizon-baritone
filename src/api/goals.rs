@@ -2,7 +2,7 @@
 // from done a position is. The heuristic must not be more than the real cost left, or the first
 // path found is not the cheapest one. Every formula and every name here is the Java's.
 use super::baritone_costs::{fall_cost, jump_one_block_cost};
-use super::baritone_utils::Pos;
+use super::baritone_utils::{maybe_censor, Pos};
 use std::cell::Cell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -138,7 +138,7 @@ impl Goal for GoalBlock {
         block_heuristic(p[0] - self.0[0], p[1] - self.0[1], p[2] - self.0[2])
     }
     fn label(&self) -> String {
-        format!("GoalBlock{{x={},y={},z={}}}", self.0[0], self.0[1], self.0[2])
+        format!("GoalBlock{{x={},y={},z={}}}", maybe_censor(self.0[0]), maybe_censor(self.0[1]), maybe_censor(self.0[2]))
     }
     fn render_pos(&self) -> Option<Pos> {
         Some(self.0)
@@ -169,7 +169,7 @@ impl Goal for GoalXZ {
         xz_heuristic(f64::from(p[0] - self.0), f64::from(p[2] - self.1))
     }
     fn label(&self) -> String {
-        format!("GoalXZ{{x={},z={}}}", self.0, self.1)
+        format!("GoalXZ{{x={},z={}}}", maybe_censor(self.0), maybe_censor(self.1))
     }
     fn column(&self) -> Option<(i32, i32)> {
         Some((self.0, self.1))
@@ -194,7 +194,7 @@ impl Goal for GoalYLevel {
         y_heuristic(self.0, p[1])
     }
     fn label(&self) -> String {
-        format!("GoalYLevel{{y={}}}", self.0)
+        format!("GoalYLevel{{y={}}}", maybe_censor(self.0))
     }
     fn shapes(&self) -> Vec<Shape> {
         vec![Shape::Level(self.0)]
@@ -247,7 +247,7 @@ impl Goal for GoalNear {
         heuristic_at_goal(self, [x - range, y - range, z - range], [x + range, y + range, z + range])
     }
     fn label(&self) -> String {
-        format!("GoalNear{{x={}, y={}, z={}, rangeSq={}}}", self.0[0], self.0[1], self.0[2], self.1 * self.1)
+        format!("GoalNear{{x={}, y={}, z={}, rangeSq={}}}", maybe_censor(self.0[0]), maybe_censor(self.0[1]), maybe_censor(self.0[2]), self.1 * self.1)
     }
     fn render_pos(&self) -> Option<Pos> {
         Some(self.0)
@@ -266,7 +266,7 @@ impl Goal for GoalGetToBlock {
         block_heuristic(p[0] - self.0[0], head_shift(p[1] - self.0[1]), p[2] - self.0[2])
     }
     fn label(&self) -> String {
-        format!("GoalGetToBlock{{x={},y={},z={}}}", self.0[0], self.0[1], self.0[2])
+        format!("GoalGetToBlock{{x={},y={},z={}}}", maybe_censor(self.0[0]), maybe_censor(self.0[1]), maybe_censor(self.0[2]))
     }
     fn render_kind(&self) -> GoalRender {
         GoalRender::Pos { pos: self.0, halved: true }
@@ -287,7 +287,7 @@ impl Goal for GoalTwoBlocks {
         block_heuristic(p[0] - self.0[0], head_shift(p[1] - self.0[1]), p[2] - self.0[2])
     }
     fn label(&self) -> String {
-        format!("GoalTwoBlocks{{x={},y={},z={}}}", self.0[0], self.0[1], self.0[2])
+        format!("GoalTwoBlocks{{x={},y={},z={}}}", maybe_censor(self.0[0]), maybe_censor(self.0[1]), maybe_censor(self.0[2]))
     }
     fn render_kind(&self) -> GoalRender {
         GoalRender::Pos { pos: self.0, halved: true }
@@ -607,7 +607,7 @@ impl Goal for GoalStrictDirection {
         f64::NEG_INFINITY
     }
     fn label(&self) -> String {
-        format!("GoalStrictDirection{{x={}, y={}, z={}, dx={}, dz={}}}", self.origin[0], self.origin[1], self.origin[2], self.dx, self.dz)
+        format!("GoalStrictDirection{{x={}, y={}, z={}, dx={}, dz={}}}", maybe_censor(self.origin[0]), maybe_censor(self.origin[1]), maybe_censor(self.origin[2]), maybe_censor(self.dx), maybe_censor(self.dz))
     }
 }
 

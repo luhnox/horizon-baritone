@@ -138,6 +138,9 @@ impl MineProcess {
         locs.extend(dropped);
         if locs.is_empty() && !core.settings.flag("exploreForBlocks") {
             core.say(game, &format!("No locations for {filter} known, cancelling"));
+            if core.settings.flag("notificationOnMineFail") {
+                core.notify(&format!("No locations for {filter} known, cancelling"), true);
+            }
             self.cancel_now(core, game);
             return;
         }
@@ -421,6 +424,9 @@ impl Process for MineProcess {
         if calc_failed {
             if !self.known_ore_locations.is_empty() && core.settings.flag("blacklistClosestOnFailure") {
                 core.say(game, &format!("Unable to find any path to {filter}, blacklisting presumably unreachable closest instance..."));
+                if core.settings.flag("notificationOnMineFail") {
+                    core.notify(&format!("Unable to find any path to {filter}, blacklisting presumably unreachable closest instance..."), true);
+                }
                 if let Some(p) = self.known_ore_locations.iter().copied().min_by_key(|t| dist_sq(*t, feet)) {
                     self.blacklist.push(p);
                 }
@@ -428,6 +434,9 @@ impl Process for MineProcess {
                 self.known_ore_locations.retain(|p| !blacklist.contains(p));
             } else {
                 core.say(game, &format!("Unable to find any path to {filter}, canceling mine"));
+                if core.settings.flag("notificationOnMineFail") {
+                    core.notify(&format!("Unable to find any path to {filter}, canceling mine"), true);
+                }
                 self.cancel_now(core, game);
                 return PathingCommand::Defer;
             }

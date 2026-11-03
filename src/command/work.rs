@@ -4,14 +4,14 @@
 use super::baritone::Baritone;
 use super::baritone_argument::{Args, CommandError, CommandResult};
 use super::baritone_cmd_build::resolve_file;
-use super::baritone_command::{begin, block_word, blocks, clickable, dimension, feet, here, relative, run_event, Command};
+use super::baritone_command::{begin, block_word, blocks, clickable, dimension, feet, here, relative, run_event, Command, CLICK};
 use super::baritone_goals::Goal;
 use super::baritone_gworld::{bare, targets};
 use super::baritone_p_explore::read_filter;
 use super::baritone_p_follow::Filter;
 use super::baritone_utils::pos_label;
 use super::Game;
-use horizon_client::text::{self, Text};
+use horizon_client::text::{self, ClickEvent, Style, Text};
 use std::collections::HashSet;
 
 pub const COMMANDS: &[Command] = &[
@@ -335,40 +335,87 @@ fn on_2b2t(game: &Game<'_>) -> bool {
     game.remote.as_ref().is_some_and(|r| r.session.address.to_lowercase().contains("2b2t.org"))
 }
 
-/// `ElytraCommand.gatekeep`: what the first #elytra says until elytraTermsAccepted is on.
+/// A piece of a chat component with a style: the Java's `MutableComponent` with `setStyle`.
+fn piece(text: impl Into<String>, style: Style) -> Text {
+    Text::styled(text, style)
+}
+
+/// The text a hover shows: the commands that a setting suggestion would run.
+fn hover(text: String) -> Option<Box<Text>> {
+    Some(Box::new(Text::literal(text)))
+}
+
+/// `ElytraCommand.suggest2b2tSeeds`: the advice, with the two seeds as links that set them.
+fn suggest_2b2t_seeds(prefix: &str) -> Text {
+    let link = |label: &str, seed: i64| {
+        piece(
+            label,
+            Style {
+                underlined: Some(true),
+                bold: Some(true),
+                hover: hover(format!("{prefix}set elytraNetherSeed {seed}")),
+                click: Some(ClickEvent::RunCommand(format!("{CLICK} set elytraNetherSeed {seed}"))),
+                ..Style::default()
+            },
+        )
+    };
+    Text::literal("Within a few hundred blocks of spawn/axis/highways/etc, the terrain is too fragmented to be predictable. Baritone Elytra will still work, just with backtracking. ")
+        .append(Text::literal("However, once you get more than a few thousand blocks out, you should try "))
+        .append(link("the older seed (click here)", OLD_2B2T_SEED))
+        .append(Text::literal(". Once you're further out into newer terrain generation (this includes everything up through 1.12), you should try "))
+        .append(link("the newer seed (click here)", NEW_2B2T_SEED))
+        .append(Text::literal(". Once you get into 1.19 terrain, the terrain becomes unpredictable again, due to custom non-vanilla generation, and you should set #elytraPredictTerrain to false. "))
+}
+
+/// `ElytraCommand.gatekeep`: what the first #elytra says until elytraTermsAccepted is on, as the one message the Java makes of it.
 fn elytra_gatekeep(b: &mut Baritone, game: &mut Game<'_>) {
-    let say = |b: &Baritone, game: &mut Game<'_>, s: &str| b.core.say(game, s);
-    say(b, game, "To disable this message, enable the setting elytraTermsAccepted");
-    say(b, game, "Baritone Elytra is an experimental feature. It is intended for long distance travel in the Nether but will also work in the Overworld, using fireworks for vanilla boost. It will not work with any other mods (\"hacks\") for non-vanilla boost. If you want Baritone to attempt to take off from the ground for you, you can enable the elytraAutoJump setting (not advisable on laggy servers!). If you want Baritone to go slower, enable the elytraConserveFireworks setting and/or decrease the elytraFireworkSpeed setting.");
-    say(b, game, "Baritone Elytra for use in the Nether wants to know the seed of the world you are in. If it doesn't have the correct seed, it will frequently backtrack. It uses the seed to generate terrain far beyond what you can see, since terrain obstacles in the Nether can be much larger than your render distance.");
+    let prefix = b.core.settings.text("prefix");
+    let red = || Style { color: Some(text::RED), underlined: Some(true), bold: Some(true), ..Style::default() };
+    let mut message = Text::literal("To disable this message, enable the setting elytraTermsAccepted\n")
+        .append(Text::literal("Baritone Elytra is an experimental feature. It is intended for long distance travel in the Nether but will also work in the Overworld, using fireworks for vanilla boost. It will not work with any other mods (\"hacks\") for non-vanilla boost. "))
+        .append(piece(
+            "If you want Baritone to attempt to take off from the ground for you, you can enable the elytraAutoJump setting (not advisable on laggy servers!). ",
+            Style { hover: hover(format!("{prefix}set elytraAutoJump true")), ..Style::default() },
+        ))
+        .append(piece(
+            "If you want Baritone to go slower, enable the elytraConserveFireworks setting and/or decrease the elytraFireworkSpeed setting. ",
+            Style {
+                hover: hover(format!("{prefix}set elytraConserveFireworks true\n{prefix}set elytraFireworkSpeed 0.6\n(the 0.6 number is just an example, tweak to your liking)")),
+                ..Style::default()
+            },
+        ))
+        .append(
+            Text::literal("Baritone Elytra for use in the ")
+                .append(piece("Nether", red()))
+                .append(Text::literal(", "))
+                .append(piece("wants to know the seed", red()))
+                .append(Text::literal(" of the world you are in. If it doesn't have the correct seed, it will frequently backtrack. It uses the seed to generate terrain far beyond what you can see, since terrain obstacles in the Nether can be much larger than your render distance. ")),
+        )
+        .append(Text::literal("\n"));
     let seed = b.core.settings.long("elytraNetherSeed");
     let predict = b.core.settings.flag("elytraPredictTerrain");
     if on_2b2t(game) {
-        say(b, game, "It looks like you're on 2b2t. Terrain prediction can be used but new nether terrain can not be predicted on 2b2t.");
-        suggest_2b2t_seeds(b, game);
+        let mut on = Text::literal("It looks like you're on 2b2t. Terrain prediction can be used but new nether terrain can not be predicted on 2b2t. ").append(suggest_2b2t_seeds(&prefix));
         if !predict {
-            say(b, game, "#elytraPredictTerrain is currently disabled.");
+            on = on.append(Text::literal(format!("{prefix}elytraPredictTerrain is currently disabled. ")));
         } else if seed == NEW_2B2T_SEED {
-            say(b, game, "You are using the newer seed.");
+            on = on.append(Text::literal("You are using the newer seed. "));
         } else if seed == OLD_2B2T_SEED {
-            say(b, game, "You are using the older seed.");
+            on = on.append(Text::literal("You are using the older seed. "));
         } else {
+            on = on.append(Text::literal("Defaulting to the newer seed. "));
             let _ = b.core.settings.set("elytraNetherSeed", &NEW_2B2T_SEED.to_string());
-            say(b, game, "Defaulting to the newer seed.");
         }
+        message = message.append(on);
     } else if seed == NEW_2B2T_SEED {
-        say(b, game, "Baritone doesn't know the seed of your world. Set it with: #set elytraNetherSeed seedgoeshere");
-        say(b, game, "For the time being, elytraPredictTerrain is defaulting to false since the seed is unknown.");
+        message = message.append(Text::literal(format!("Baritone doesn't know the seed of your world. Set it with: {prefix}set elytraNetherSeed seedgoeshere\nFor the time being, elytraPredictTerrain is defaulting to false since the seed is unknown.")));
         let _ = b.core.settings.set("elytraPredictTerrain", "false");
     } else if predict {
-        say(b, game, &format!("Baritone Elytra is predicting terrain assuming that {seed} is the correct seed. Change that with #set elytraNetherSeed seedgoeshere, or disable it with #set elytraPredictTerrain false"));
+        message = message.append(Text::literal(format!("Baritone Elytra is predicting terrain assuming that {seed} is the correct seed. Change that with {prefix}set elytraNetherSeed seedgoeshere, or disable it with {prefix}set elytraPredictTerrain false")));
     } else {
-        say(b, game, "Baritone Elytra is not predicting terrain. If you don't know the seed, this is the correct thing to do. If you do know the seed, input it with #set elytraNetherSeed seedgoeshere, and then enable it with #set elytraPredictTerrain true");
+        message = message.append(Text::literal(format!("Baritone Elytra is not predicting terrain. If you don't know the seed, this is the correct thing to do. If you do know the seed, input it with {prefix}set elytraNetherSeed seedgoeshere, and then enable it with {prefix}set elytraPredictTerrain true")));
     }
-}
-
-fn suggest_2b2t_seeds(b: &mut Baritone, game: &mut Game<'_>) {
-    b.core.say(game, &format!("Within a few hundred blocks of spawn/axis/highways/etc, the terrain is too fragmented to be predictable. Baritone Elytra will still work, just with backtracking. However, once you get more than a few thousand blocks out, you should try the older seed (#set elytraNetherSeed {OLD_2B2T_SEED}). Once you're further out into newer terrain generation (this includes everything up through 1.12), you should try the newer seed (#set elytraNetherSeed {NEW_2B2T_SEED}). Once you get into 1.19 terrain, the terrain becomes unpredictable again, due to custom non-vanilla generation, and you should set #elytraPredictTerrain to false."));
+    b.core.say_text(game, message);
 }
 
 fn elytra(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
@@ -381,8 +428,9 @@ fn elytra(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
             if on_2b2t(game) && b.core.settings.flag("elytraPredictTerrain") {
                 let seed = b.core.settings.long("elytraNetherSeed");
                 if seed != NEW_2B2T_SEED && seed != OLD_2B2T_SEED {
-                    b.core.say(game, "It looks like you're on 2b2t, but elytraNetherSeed is incorrect.");
-                    suggest_2b2t_seeds(b, game);
+                    b.core.say_text(game, Text::literal("It looks like you're on 2b2t, but elytraNetherSeed is incorrect."));
+                    let prefix = b.core.settings.text("prefix");
+                    b.core.say_text(game, suggest_2b2t_seeds(&prefix));
                 }
             }
         } else {

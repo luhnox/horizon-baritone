@@ -108,7 +108,7 @@ pub fn resolve_file(game: &Game<'_>, name: &str) -> PathBuf {
     relative_file(game, name)
 }
 
-const FORMATS: &str = "schem, litematic, nbt";
+const FORMATS: &str = "schematic, schem, litematic, nbt";
 
 fn build(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     let word = args.string("a file")?;
@@ -128,7 +128,7 @@ fn build(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResul
         return Err(CommandError::new(format!("Cannot find {}", file.display())));
     }
     let ext = file.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    if !["schem", "litematic", "nbt"].contains(&ext.as_str()) {
+    if !["schematic", "schem", "litematic", "nbt"].contains(&ext.as_str()) {
         return Err(CommandError::new(format!("Unsupported schematic format. Reckognized file extensions are: {}", FORMATS.replace(", ", ", "))));
     }
     let origin = feet(game)?;
@@ -145,7 +145,7 @@ fn build(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResul
     let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     begin(b, game)?;
     let Baritone { core, procs, .. } = b;
-    procs.build.build(core, game, name, Rc::new(schematic), build_origin);
+    procs.build.build_file(core, game, name, schematic, build_origin);
     b.core.say(game, &format!("Successfully loaded schematic for building\nOrigin: {}", pos_label(build_origin)));
     Ok(())
 }

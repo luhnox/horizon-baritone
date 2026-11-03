@@ -35,7 +35,7 @@ use std::{
 };
 
 pub const ID: &str = "baritone";
-pub const VERSION: &str = "1.1.17";
+pub const VERSION: &str = "1.1.22";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -128,6 +128,7 @@ impl Core {
     /// The values worked out from settings, after any of them changes.
     pub fn refresh(&mut self) {
         super::baritone_goals::set_cost_heuristic(self.settings.float("costHeuristic"));
+        super::baritone_utils::set_censor(self.settings.flag("censorCoordinates"));
         self.avoid_breaking = self.settings.list("blocksToAvoidBreaking");
         self.throwaway = self.settings.list("acceptableThrowawayItems");
     }
@@ -225,6 +226,13 @@ impl Core {
         let line = if self.settings.flag("useMessageTag") { body } else { self.prefix_text().append(body) };
         let focused = game.screen == Screen::Chat;
         game.ui.chat.add(&game.gui.atlas, line, None, ChatSource::Client, game.ticks, focused);
+    }
+
+    /// `Helper.logNotification`: a desktop notification, when desktopNotifications is on.
+    pub fn notify(&self, message: &str, error: bool) {
+        if self.settings.flag("desktopNotifications") {
+            super::baritone_notification::notify(message, error);
+        }
     }
 
     pub fn say(&self, game: &mut Game<'_>, message: &str) {
@@ -615,16 +623,32 @@ thread_local! {
     /// The blocks set since the last tick, as (x, y, z, solid): `BlockChangeEvent`. A thread-local of its own, because the game
     /// sets blocks from inside calls Baritone makes.
     static BLOCK_CHANGES: RefCell<Vec<(i32, i32, i32, bool)>> = const { RefCell::new(Vec::new()) };
+    /// The chunks where a block the cached world keeps track of was set, for repackOnAnyBlockChange.
+    static TRACKED_CHANGES: RefCell<Vec<(i32, i32)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// `BlockChangeEvent`: a block was set.
 pub fn block_changed(game: &Game<'_>, pos: [i32; 3], state: i32) {
-    let solid = !game.res.facts().is_air(horizon_world::registry::BlockStateId(state.max(0) as u32));
+    let id = horizon_world::registry::BlockStateId(state.max(0) as u32);
+    let solid = !game.res.facts().is_air(id);
+    let name = game.res.facts().get(id).name.clone();
+    if super::baritone_cached_world::BLOCKS_TO_KEEP_TRACK_OF.contains(&name.strip_prefix("minecraft:").unwrap_or(&name)) {
+        TRACKED_CHANGES.with_borrow_mut(|tracked| {
+            if tracked.len() < 1 << 12 {
+                tracked.push((pos[0] >> 4, pos[2] >> 4));
+            }
+        });
+    }
     BLOCK_CHANGES.with_borrow_mut(|changes| {
         if changes.len() < 1 << 16 {
             changes.push((pos[0], pos[1], pos[2], solid));
         }
     });
+}
+
+/// The chunks with a tracked block set since the last call.
+pub fn take_tracked_block_changes() -> Vec<(i32, i32)> {
+    TRACKED_CHANGES.with_borrow_mut(std::mem::take)
 }
 
 /// The block changes since the last call.

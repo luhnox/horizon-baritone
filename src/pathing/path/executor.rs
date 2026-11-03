@@ -12,7 +12,7 @@ use super::baritone_player_context::PlayerContext;
 use super::baritone_rotation::calc_rotation_from_vec3d;
 use super::baritone_sprint_jump::{SprintJump, MAX_TICKS as FLIGHT_MAX_TICKS};
 use super::baritone_settings::Settings;
-use super::baritone_utils::Pos;
+use super::baritone_utils::{maybe_censor, Pos};
 use std::collections::HashSet;
 
 const MAX_MAX_DIST_FROM_PATH: f64 = 3.0;
@@ -65,6 +65,11 @@ fn add(p: Pos, d: (i32, i32, i32)) -> Pos {
 
 fn dir_of(m: &Movement) -> (i32, i32, i32) {
     (m.dest[0] - m.src[0], m.dest[1] - m.src[1], m.dest[2] - m.src[2])
+}
+
+/// A position for a diagnostic line, hidden while censorCoordinates is on.
+fn spot(p: Pos) -> String {
+    format!("[{}, {}, {}]", maybe_censor(p[0]), maybe_censor(p[1]), maybe_censor(p[2]))
 }
 
 impl PathExecutor {
@@ -258,7 +263,7 @@ impl PathExecutor {
         }
         if e.settings.flag("chatDebug") && self.ticks_on_current % 40 == 39 {
             let m = &self.path.movements[self.path_position];
-            self.debug(format!("{:?} {:?} -> {:?} at {:?} y {:.2}: {:?} holding {:?}", m.kind, m.src, m.dest, ctx.player_feet(), ctx.position()[1], movement_status, m.last_inputs));
+            self.debug(format!("{:?} {} -> {} at {} y {}: {:?} holding {:?}", m.kind, spot(m.src), spot(m.dest), spot(ctx.player_feet()), maybe_censor(ctx.position()[1] as i32), movement_status, m.last_inputs));
         }
         self.sprint_next_tick = self.should_sprint_next_tick(e, &env);
         if !self.sprint_next_tick {
@@ -682,7 +687,7 @@ impl PathExecutor {
         if e.settings.flag("chatDebug") && self.path_position < self.path.movements.len() {
             let m = &self.path.movements[self.path_position];
             let feet = e.ctx.player_feet();
-            self.debug(format!("[tick {}] movement {}/{}: {:?} {:?} -> {:?}, took {} ticks, feet now {:?}", e.ticks, self.path_position, self.path.movements.len(), m.kind, m.src, m.dest, self.ticks_on_current, feet));
+            self.debug(format!("[tick {}] movement {}/{}: {:?} {} -> {}, took {} ticks, feet now {}", e.ticks, self.path_position, self.path.movements.len(), m.kind, spot(m.src), spot(m.dest), self.ticks_on_current, spot(feet)));
         }
         self.ticks_on_current = 0;
     }

@@ -248,12 +248,16 @@ impl WorldProvider {
         queued
     }
 
-    /// The next few chunks to pack: loaded ones only.
-    pub fn take_batch(&mut self, game: &Game<'_>, n: usize) -> Vec<(i32, i32)> {
+    /// The next few chunks to pack: loaded ones only. A chunk taken while more than `queue_max` wait behind it is dropped, not
+    /// packed (`chunkPackerQueueMaxSize`, which the Java's packer thread does the same with).
+    pub fn take_batch(&mut self, game: &Game<'_>, n: usize, queue_max: usize) -> Vec<(i32, i32)> {
         let Some(data) = self.current.as_mut() else { return Vec::new() };
         let mut batch = Vec::new();
         while batch.len() < n {
             let Some(k) = data.cache.next_to_pack() else { break };
+            if data.cache.pending() > queue_max {
+                continue;
+            }
             if game.world.chunks.contains_key(&k) {
                 batch.push(k);
             }

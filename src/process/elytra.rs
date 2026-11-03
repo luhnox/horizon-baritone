@@ -648,12 +648,12 @@ impl Process for ElytraProcess {
             if let Some(last) = last {
                 if dist_to(last) < 1.0 {
                     if core.settings.flag("notificationOnPathComplete") && !self.reached_goal {
-                        core.say(game, "Pathing complete");
+                        core.notify("Pathing complete", false);
                     }
                     if core.settings.flag("disconnectOnArrival") && !self.reached_goal {
-                        // Leaving the world is not something a mod can do here: stop instead.
+                        // Don't be active when the user logs back in.
                         self.lost(true);
-                        core.say(game, "Arrived. disconnectOnArrival is not supported in this port, so it only stops.");
+                        let _ = game.close_world();
                         return PathingCommand::CancelAndClearGoal;
                     }
                     self.reached_goal = true;

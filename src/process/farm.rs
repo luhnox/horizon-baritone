@@ -251,6 +251,9 @@ impl Process for FarmProcess {
 
         if calc_failed {
             core.say(game, "Farm failed");
+            if core.settings.flag("notificationOnFarmFail") {
+                core.notify("Farm failed", true);
+            }
             self.active = false;
             return PathingCommand::RequestPause;
         }
@@ -296,6 +299,9 @@ impl Process for FarmProcess {
                 return PathingCommand::RequestPause;
             }
             core.say(game, "Farm failed");
+            if core.settings.flag("notificationOnFarmFail") {
+                core.notify("Farm failed", true);
+            }
             self.active = false;
             return PathingCommand::RequestPause;
         }

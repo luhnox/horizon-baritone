@@ -251,12 +251,18 @@ impl Process for ExploreProcess {
         let Some(origin) = self.exploration_origin else { return PathingCommand::Defer };
         if calc_failed {
             core.say(game, "Failed");
+            if core.settings.flag("notificationOnExploreFinished") {
+                core.notify("Exploration failed", true);
+            }
             self.exploration_origin = None;
             return PathingCommand::Defer;
         }
         let minimum = core.settings.int("exploreChunkSetMinimumSize").max(0) as usize;
         if !core.settings.flag("disableCompletionCheck") && self.count_remain(core.world_data.current.as_mut().map(|d| &mut d.cache), minimum) == 0 {
             core.say(game, "Explored all chunks");
+            if core.settings.flag("notificationOnExploreFinished") {
+                core.notify("Explored all chunks", false);
+            }
             self.exploration_origin = None;
             return PathingCommand::Defer;
         }

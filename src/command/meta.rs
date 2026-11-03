@@ -153,14 +153,8 @@ pub const COMMANDS: &[Command] = &[
 // set
 
 fn type_name(d: &Def) -> &'static str {
-    match d.kind {
-        Kind::Bool => "boolean",
-        Kind::Int => "integer",
-        Kind::Float => "double",
-        Kind::Text => "string",
-        Kind::Color => "color",
-        Kind::List => "list",
-    }
+    // SettingsUtil.settingTypeToString: the Java type, `Boolean`, `Double`, `List<Block>`.
+    settings::java_type(d.name)
 }
 
 fn setting_by_name(name: &str) -> CommandResult<&'static Def> {

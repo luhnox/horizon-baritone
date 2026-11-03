@@ -19,8 +19,13 @@ pub struct Pauser {
     pub ticks_of_stationary: i32,
 }
 
+/// `BuilderProcess.placeAt(x, y, z, current)`: the state the build wants at a position, or None when it has no say or wants air.
+pub type PlaceAt = std::rc::Rc<dyn Fn(i32, i32, i32, &super::baritone_block_state::BlockState) -> Option<std::rc::Rc<super::baritone_block_state::BlockState>>>;
+
 #[derive(Default)]
 pub struct InventoryBehavior {
+    /// Set by the builder while it has a schematic, for the block it would place at a position.
+    pub place_at: Option<PlaceAt>,
     ticks_since_last_move: i32,
     /// Not everything asks every tick, so the request is remembered while the player comes to a halt.
     last_requested: Option<(usize, usize)>,
@@ -207,6 +212,17 @@ fn temp_hotbar_slot(game: &Game<'_>, disallowed: &dyn Fn(usize) -> bool) -> Opti
 /// hotbar slot trade stacks. The slot numbers are the game's own (hotbar 0 to 8, main inventory 9 to 35).
 fn swap_click(game: &mut Game<'_>, in_inventory: usize, in_hotbar: usize) -> bool {
     let ops = [(Some(in_inventory), in_hotbar as i32, Input::Swap)];
+    if game.remote.is_some() {
+        game.remote_menu_ops(&ops)
+    } else {
+        game.menu_ops(&ops)
+    }
+}
+
+/// `windowClick(containerId, slot, 0, ClickType.PICKUP)` on the player's inventory menu: the stack of the slot is picked up,
+/// or the carried one put down (the game's own slot numbers: hotbar 0 to 8, main inventory 9 to 35, armor 500 to 503).
+pub fn pickup_click(game: &mut Game<'_>, slot: usize) -> bool {
+    let ops = [(Some(slot), 0, Input::Pickup)];
     if game.remote.is_some() {
         game.remote_menu_ops(&ops)
     } else {

@@ -9,9 +9,9 @@ This port is **not complete**. This file lists the classes of Baritone 1.21.4 (`
 | missing | not written |
 | n/a | Java or Minecraft machinery with no meaning in Rust on Horizon (mixin accessors, the event bus, toasts) |
 
-Rows below: 297 (classes that go together share a row). ported 157, partial 74, missing 25, n/a 41.
+Rows below: 297 (classes that go together share a row). ported 164, partial 72, missing 20, n/a 41.
 
-The settings are 243 of 252 (generated from Settings.java). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`; the processes and the path executor are the largest gap, and 
+All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from Settings.java, with the Java type `#set` prints), and every one is read by something, except five that have nothing to act on in Horizon: `logAsToast` (no way to push a toast of its own), `renderGoalXZBeacon`, `renderCachedChunks` and `cachedChunksOpacity` (no way to draw a beam or the cached world), and `pathingMapLoadFactor` (it tunes the Java hash map). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`. What is left in the rows below is mostly what needs a screen or a renderer of the game own: GuiClick (`#click` walks onto the block under the crosshair), the toast, and the semitransparent cached chunks.
 
 
 ## api
@@ -21,7 +21,7 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | BaritoneAPI | n/a | one instance, no provider |
 | IBaritone | partial | src/baritone.rs (Baritone, Core) |
 | IBaritoneProvider | n/a | one instance |
-| Settings | ported | src/api/settings.rs: 243 of 252, generated from Settings.java; not yet: buildSubstitutes, buildValidSubstitutes, buildRepeat, buildSchematicRotation, buildSchematicMirror (types the table cannot hold); the JavaOnly four are hidden by #set in the Java too |
+| Settings | ported | src/api/settings.rs: generated from Settings.java, with Vec3i, Rotation, Mirror and Map<Block, List<Block>> parsed as the Java parses them; the JavaOnly four are hidden by #set in the Java too |
 
 ## api/behavior
 
@@ -184,12 +184,12 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | ISchematic | partial | Schematic trait: desired() instead of desiredState() |
 | ISchematicSystem | partial | src/schematic/format.rs |
 | IStaticSchematic | partial | StaticSchematic |
-| MaskSchematic | partial | Shape |
-| MirroredSchematic | missing |  |
+| MaskSchematic | ported | src/schematic/wrappers.rs |
+| MirroredSchematic | ported | src/schematic/wrappers.rs: the block states turn with Horizon structure tables |
 | ReplaceSchematic | ported |  |
-| RotatedSchematic | partial | rotate_quarter |
+| RotatedSchematic | ported | src/schematic/wrappers.rs |
 | ShellSchematic | partial | Shape::Shell |
-| SubstituteSchematic | missing |  |
+| SubstituteSchematic | ported | src/schematic/wrappers.rs |
 | WallsSchematic | partial | Shape::Walls |
 | ISchematicFormat | partial |  |
 
@@ -391,9 +391,9 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | Java | Status | Rust or note |
 |---|---|---|
 | BackfillProcess | ported | src/process/backfill.rs |
-| BuilderProcess | partial | src/process/build.rs and builder_logic.rs: written from the Java; the inventory moves of allowInventory, MapArt and selection schematics, buildRepeat and the substitutes are not |
-| CustomGoalProcess | ported | src/process/goal.rs: disconnectOnArrival and the elytra hand-over are not |
-| ElytraProcess | ported | src/process/elytra.rs: written from the Java; disconnectOnArrival only stops |
+| BuilderProcess | partial | src/process/build.rs and builder_logic.rs: written from the Java; a schematic is of this crate text kind until the builder turns it into block states; the placeAt hint matches the block, not the item exact placement state |
+| CustomGoalProcess | ported | src/process/goal.rs |
+| ElytraProcess | ported | src/process/elytra.rs: written from the Java |
 | ExploreProcess | ported | src/process/explore.rs over the cached world |
 | FarmProcess | ported | src/process/farm.rs: bone meal targets are crops and cocoa |
 | FollowProcess | ported | src/process/follow.rs |
@@ -489,13 +489,13 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 
 | Java | Status | Rust or note |
 |---|---|---|
-| MapArtSchematic | missing |  |
+| MapArtSchematic | ported | MaskSchematic::map_art |
 | SchematicSystem | partial |  |
-| SelectionSchematic | missing |  |
+| SelectionSchematic | ported | MaskSchematic::selection |
 | StaticSchematic | partial |  |
 | DefaultSchematicFormats | partial | src/schematic/format.rs |
 | LitematicaSchematic | partial | .litematic read |
-| MCEditSchematic | missing | old .schematic |
+| MCEditSchematic | ported | src/schematic/legacy.rs: the id table is the game own ItemIdFix |
 | SpongeSchematic | partial | .schem read |
 | LitematicaHelper | n/a | needs the Litematica mod |
 | SchematicAdapter, SchematicaHelper | n/a | need the Schematica mod |

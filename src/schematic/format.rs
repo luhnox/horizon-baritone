@@ -1,6 +1,6 @@
 // baritone.api.schematic.format: reading a schematic from a file. Sponge `.schem` (WorldEdit, v2
-// and v3), Litematica `.litematic` (any number of regions) and vanilla structure `.nbt` are read. The
-// old numeric-id `.schematic` is not: its blocks have no names to read.
+// and v3), Litematica `.litematic` (any number of regions), MCEdit `.schematic` (numbered blocks, no data values, as the
+// Java reads it) and vanilla structure `.nbt` are read.
 use super::baritone_schematic::{BlockSpec, StaticSchematic};
 use horizon_world::nbt::{read_named, Limits, Tag};
 use std::io::Read;
@@ -24,8 +24,8 @@ pub fn read(path: &Path) -> Result<StaticSchematic, String> {
         "litematic" => litematic(&tag, name),
         "schem" => sponge(&tag, name),
         "nbt" => structure(&tag, name),
-        "schematic" => Err("The old .schematic format has numbered blocks and no names; save it as .schem (WorldEdit //schem save) and build that.".into()),
-        other => Err(format!("I do not know the .{other} format. .schem, .litematic and .nbt are read.")),
+        "schematic" => mcedit(&tag, name),
+        other => Err(format!("I do not know the .{other} format. .schematic, .schem, .litematic and .nbt are read.")),
     }
 }
 
@@ -64,6 +64,30 @@ fn palette_entry(tag: &Tag) -> BlockSpec {
         }
     }
     spec
+}
+
+/// MCEdit `.schematic` (`MCEditSchematic`): a byte per block (`Blocks`, with the high nibbles in `AddBlocks`), looked up in the old
+/// id table. The data values are not read, so every block is the default state of its block.
+fn mcedit(root: &Tag, name: String) -> Result<StaticSchematic, String> {
+    let materials = text(root.get("Materials")).unwrap_or_default();
+    if materials != "Alpha" {
+        return Err(format!("bad schematic {materials}"));
+    }
+    let (w, h, l) = (
+        int(root.get("Width")).ok_or("The schematic has no Width.")?,
+        int(root.get("Height")).ok_or("The schematic has no Height.")?,
+        int(root.get("Length")).ok_or("The schematic has no Length.")?,
+    );
+    dimensions_check(w, h, l)?;
+    let Some(Tag::ByteArray(blocks)) = root.get("Blocks") else { return Err("The schematic has no Blocks.".into()) };
+    let additional: Option<&Vec<u8>> = match root.get("AddBlocks") {
+        Some(Tag::ByteArray(add)) => Some(add),
+        _ => None,
+    };
+    let names = super::baritone_schematic_legacy::mcedit_block_names((w * h * l) as usize, blocks, additional.map(Vec::as_slice));
+    let mut out = StaticSchematic { size: [w, h, l], blocks: Vec::new(), name };
+    out.blocks = names.into_iter().map(|n| Some(BlockSpec::named(n))).collect();
+    Ok(out)
 }
 
 fn dimensions_check(w: i32, h: i32, l: i32) -> Result<(), String> {

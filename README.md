@@ -6,9 +6,11 @@ is a Horizon **native mod**: a bundle of Rust source that `horizon-mixins` splic
 it is compiled. The Java mod cannot run in Horizon, so this is written again against Horizon's own
 world, collision and input code.
 
-> **Status: work in progress, not a complete port.** Of the 332 Java files of Baritone 1.21.4, a part is
-> ported, a part is simpler than the original and a part is not written. [PARITY.md](PARITY.md) lists
-> every class and says which. Read it before relying on a feature.
+> **Status: close to complete.** [PARITY.md](PARITY.md) lists every class of Baritone 1.21.4 and says which are
+> written from the Java, which are simpler, and which are missing. Every setting, command, process and behavior
+> is here. What cannot be done: the click screen (`#click` walks onto the block under the crosshair), toasts
+> (`logAsToast`) and the cached chunks drawn semitransparent (`renderCachedChunks`), because Horizon gives a mod
+> no screen, toast or chunk renderer of its own.
 
 Pinned to Horizon commit `142388e1c136e622652ec7505af15d8ad195e041` (Nightly 2026-11-01). The mod reads the
 game's private state, so a later Nightly may need it ported.
@@ -24,16 +26,17 @@ The command names, aliases, descriptions and messages are Baritone 1.21.4's (`ba
 
 ## Install
 
-The launcher builds it into a game of its own (10 to 30 minutes the first time). It runs native code with
-your rights: read the source first.
+Download `baritone.hnmod` from the [latest release](https://github.com/luhnox/horizon-baritone/releases/latest) and
+install it in the launcher's native mods. The launcher builds it into a game of its own (10 to 30 minutes the
+first time). It runs native code with your rights: read the source first.
 
 ```
 horizon-launcher native-build --trust-native-code
 ```
 
-with `dist/baritone.hnmod` installed in the launcher's native mods and turned on. A `release` build
-(`horizon-launcher settings native-profile release`) is recommended: the `dev` profile makes the game's
-start function too large for the default 2 MB stack (`tools/patch_stack.py` raises it for a `fast` build).
+A `release` build (`horizon-launcher settings native-profile release`) is recommended: the `dev` profile makes the
+game's start function too large for the default 2 MB stack (`tools/patch_stack.py` raises it for a `fast` build).
+To make the file yourself, `python tools/pack.py` writes `dist/baritone.hnmod`.
 
 ## Layout
 
@@ -44,7 +47,7 @@ src/
   baritone.rs           Baritone and Core: the instance, the tick, the chat, the pathing control
   api/                  goals, settings, utils            (baritone.api.*)
   pathing/              A* search, move generation, costs, the path executor
-  behavior/             pathing, look, input, inventory   (baritone.behavior.*)
+  behavior/             pathing, look (free look), input, inventory   (baritone.behavior.*)
   process/              mine, follow, farm, explore, build, elytra, ...   (baritone.process.*)
   command/              the commands and their argument parser   (baritone.command.*)
   cache/  selection/  schematic/                          (baritone.cache, .selection, .utils.schematic)
@@ -52,7 +55,7 @@ src/
   lib.rs, tests.rs      a crate of the parts that use no game types, so `cargo test` works on its own
 hooks/                  one small function per hook point (chat, tick, keys, tab completion, lines)
 tools/                  pack.py (builds the .hnmod), dev-sync.sh (applies it to a Horizon checkout), patch_stack.py
-dist/baritone.hnmod     the built mod
+dist/                   where pack.py writes baritone.hnmod (not tracked; releases carry it)
 PARITY.md               the class-by-class comparison with Baritone 1.21.4
 ```
 

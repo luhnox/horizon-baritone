@@ -14,7 +14,9 @@ use super::baritone_movement_state::Input;
 use super::baritone_pathing::{PathingCommand, Process};
 use super::baritone_player_context::PlayerContext;
 use super::baritone_rotation::{calc_rotation_from_vec3d, Rotation};
-use super::baritone_schematic::{BlockSpec, Schematic};
+use super::baritone_schematic::{BlockSpec, Schematic, StaticSchematic};
+use super::baritone_schematic_wrappers::{map_art_heights, MaskSchematic, MirroredSchematic, RotatedSchematic, StateOps, SubstituteSchematic};
+use super::baritone_state_ops::GameStateOps;
 use super::baritone_state_factory::StateFactory;
 use super::baritone_utils::{dist_sq, Pos};
 use super::Game;
@@ -37,7 +39,6 @@ struct Placement {
 struct SpecSchematic {
     inner: Rc<dyn Schematic>,
     factory: Rc<StateFactory>,
-    skip_blocks: Vec<String>,
     cache: RefCell<HashMap<(String, Vec<(String, String)>), Rc<BlockState>>>,
     air: Rc<BlockState>,
 }
@@ -78,11 +79,7 @@ impl ISchematic for SpecSchematic {
         if !(x >= 0 && x < self.width_x() && y >= 0 && y < self.height_y() && z >= 0 && z < self.length_z()) {
             return false;
         }
-        // The mask the builder puts round every schematic: what buildSkipBlocks names is part of nothing.
-        match self.inner.desired([x, y, z], &current.name) {
-            Some(spec) => !self.skip_blocks.iter().any(|b| format!("minecraft:{b}") == spec.name || *b == spec.name),
-            None => false,
-        }
+        self.inner.desired([x, y, z], &current.name).is_some()
     }
 }
 
@@ -123,15 +120,72 @@ impl BuilderProcess {
         }
     }
 
-    /// `build(name, schematic, origin)`.
+    /// `build(name, schematic, origin)` for a schematic of this crate's kind.
     pub fn build(&mut self, core: &mut Core, game: &mut Game<'_>, name: String, schematic: Rc<dyn Schematic>, origin: Pos) {
-        let size = schematic.size();
+        let spec = self.spec_of(core, game, schematic);
+        self.build_states(core, game, name, spec, origin, false);
+    }
+
+    fn spec_of(&self, core: &mut Core, game: &mut Game<'_>, schematic: Rc<dyn Schematic>) -> Rc<dyn ISchematic> {
         let air = core.drive(game, |_, ctx, _| ctx.air_state());
-        let skip_blocks = core.settings.list("buildSkipBlocks");
-        let spec = Rc::new(SpecSchematic { inner: schematic, factory: core.states.clone(), skip_blocks, cache: RefCell::new(HashMap::new()), air });
+        Rc::new(SpecSchematic { inner: schematic, factory: core.states.clone(), cache: RefCell::new(HashMap::new()), air })
+    }
+
+    /// `build(name, File, origin)` after the parse, with `applyMapArtAndSelection`: mapArtMode keeps only the top block of each
+    /// column, and buildOnlySelection only what the selections cover.
+    pub fn build_file(&mut self, core: &mut Core, game: &mut Game<'_>, name: String, parsed: StaticSchematic, origin: Pos) {
+        let size = parsed.size;
+        let heights = core.settings.flag("mapArtMode").then(|| {
+            map_art_heights(size[0], size[2], &|x, z| (0..size[1]).map(|y| parsed.blocks[parsed.index([x, y, z])].as_ref().is_some_and(|b| !b.is_air())).collect())
+        });
+        let mut schematic = self.spec_of(core, game, Rc::new(parsed));
+        if let Some(heights) = heights {
+            schematic = Rc::new(MaskSchematic::map_art(schematic, heights, size[2]));
+        }
+        let selecting = core.settings.flag("buildOnlySelection");
+        if selecting {
+            // The selections, relative to where the schematic is built.
+            let boxes = core.selections.selections.iter().map(|s| {
+                let (min, max) = (s.min(), s.max());
+                ([min[0] - origin[0], min[1] - origin[1], min[2] - origin[2]], [max[0] - origin[0], max[1] - origin[1], max[2] - origin[2]])
+            });
+            schematic = Rc::new(MaskSchematic::selection(schematic, boxes.collect()));
+        }
+        self.build_states(core, game, name, schematic, origin, selecting);
+    }
+
+    /// `build(name, ISchematic, origin)`: the substitutes, the mirror, the rotation and the skipped blocks go round it, in that
+    /// order. `selection` is whether it is a SelectionSchematic.
+    pub fn build_states(&mut self, core: &mut Core, game: &mut Game<'_>, name: String, schematic: Rc<dyn ISchematic>, origin: Pos, selection: bool) {
+        let size = [schematic.width_x(), schematic.height_y(), schematic.length_z()];
+        let ops: Rc<dyn StateOps> = Rc::new(GameStateOps::new(game, core.states.clone()));
+        let mut wrapped = schematic;
+        let substitutes = core.settings.block_map("buildSubstitutes");
+        if !substitutes.is_empty() {
+            wrapped = Rc::new(SubstituteSchematic::new(wrapped, substitutes, ops.clone()));
+        }
+        let mirror = core.settings.mirror("buildSchematicMirror");
+        if mirror != 0 {
+            wrapped = Rc::new(MirroredSchematic::new(wrapped, mirror, ops.clone()));
+        }
+        let rotation = core.settings.rotation("buildSchematicRotation");
+        if rotation != 0 {
+            wrapped = Rc::new(RotatedSchematic::new(wrapped, rotation, ops));
+        }
+        // TODO of the Java: the setting is read when the schematic is made, not each time it is asked.
+        let skip = core.settings.list("buildSkipBlocks");
+        let inner = wrapped.clone();
+        wrapped = Rc::new(MaskSchematic::new(
+            wrapped,
+            Rc::new(move |x, y, z, current| {
+                let wanted = inner.desired_state(x, y, z, current, &[]);
+                !skip.iter().any(|b| b == wanted.bare_name())
+            }),
+        ));
         self.name = Some(name);
         self.real_schematic = None;
-        self.schematic = Some(spec);
+        self.schematic = Some(wrapped);
+        // The orientation offsets use the size of the schematic as it came, as the Java does.
         let (mut x, mut y, mut z) = (origin[0], origin[1], origin[2]);
         if core.settings.flag("schematicOrientationX") {
             x += size[0];
@@ -146,6 +200,26 @@ impl BuilderProcess {
         self.paused = false;
         self.layer = core.settings.int("startAtLayer") as i32;
         self.stop_at_height = size[1];
+        if core.settings.flag("buildOnlySelection") && selection {
+            let selections = &core.selections.selections;
+            if selections.is_empty() {
+                core.say(game, "Poor little kitten forgot to set a selection while BuildOnlySelection is true");
+                self.stop_at_height = 0;
+            } else if core.settings.flag("buildInLayers") {
+                let minim = selections.iter().map(|s| s.min()[1]).min().unwrap_or(0);
+                let maxim = selections.iter().map(|s| s.max()[1]).max().unwrap_or(0);
+                let top_down = core.settings.flag("layerOrder");
+                let start_at_height = if top_down { y + size[1] - maxim } else { minim - y };
+                self.stop_at_height = (if top_down { y + size[1] - minim } else { maxim - y }) + 1;
+                // startAtLayer or startAtHeight, whichever is highest.
+                self.layer = self.layer.max(start_at_height / (core.settings.int("layerHeight") as i32).max(1));
+                if core.settings.flag("chatDebug") {
+                    core.say(game, &format!("Schematic starts at y={y} with height {}", size[1]));
+                    core.say(game, &format!("Selection starts at y={minim} and ends at y={maxim}"));
+                    core.say(game, &format!("Considering relevant height {start_at_height} - {}", self.stop_at_height));
+                }
+            }
+        }
         self.num_repeats = 0;
         self.observed_completed = HashSet::new();
         self.incorrect_positions = None;
@@ -176,7 +250,8 @@ impl BuilderProcess {
         self.incorrect_positions.iter().flatten().copied()
     }
 
-    fn on_lost_control_inner(&mut self, core: &Core) {
+    fn on_lost_control_inner(&mut self, core: &mut Core) {
+        core.inventory.place_at = None;
         self.incorrect_positions = None;
         self.name = None;
         self.schematic = None;
@@ -220,6 +295,18 @@ impl BuilderProcess {
             self.schematic = Some(Rc::new(LayeredSchematic { real, min_y_inclusive: min_y, max_y_inclusive: max_y }));
         }
         let Some(schematic) = self.schematic.clone() else { return PathingCommand::Defer };
+        {
+            // `placeAt`, for the inventory behavior when a movement places a block while this build is going.
+            let (wanted, origin, placeable) = (schematic.clone(), self.origin, self.approx_placeable.clone());
+            core.inventory.place_at = Some(Rc::new(move |x, y, z, current| {
+                let (rx, ry, rz) = (x - origin[0], y - origin[1], z - origin[2]);
+                if !wanted.in_schematic(rx, ry, rz, current) {
+                    return None;
+                }
+                let state = wanted.desired_state(rx, ry, rz, current, &placeable);
+                (!state.is_air()).then_some(state)
+            }));
+        }
         let valid_settings = ValidSettings::of(&core.settings);
         let hooks = Rc::new(BuilderHooks {
             placeable: self.approx_placeable.iter().take(9).cloned().collect(),
@@ -238,11 +325,31 @@ impl BuilderProcess {
                 self.layer += 1;
                 return self.tick(core, game, calc_failed, is_safe_to_cancel, recursions + 1);
             }
-            // buildRepeat is one of the settings the table cannot hold: a build does not repeat.
+            let repeat = core.settings.vec3("buildRepeat");
+            let max = core.settings.int("buildRepeatCount");
             self.num_repeats += 1;
-            core.say(game, "Done building");
-            self.on_lost_control_inner(core);
-            return PathingCommand::Defer;
+            if repeat == [0, 0, 0] || (max != -1 && self.num_repeats >= max) {
+                core.say(game, "Done building");
+                if core.settings.flag("notificationOnBuildFinished") {
+                    core.notify("Done building", false);
+                }
+                self.on_lost_control_inner(core);
+                return PathingCommand::Defer;
+            }
+            // Build repeat time.
+            self.layer = 0;
+            self.origin = [self.origin[0] + repeat[0], self.origin[1] + repeat[1], self.origin[2] + repeat[2]];
+            if !core.settings.flag("buildRepeatSneaky") {
+                schematic.reset();
+            }
+            core.say(
+                game,
+                &format!(
+                    "Repeating build in vector Vec3i{{x={}, y={}, z={}}}, new origin is BlockPos{{x={}, y={}, z={}}}",
+                    repeat[0], repeat[1], repeat[2], self.origin[0], self.origin[1], self.origin[2]
+                ),
+            );
+            return self.tick(core, game, calc_failed, is_safe_to_cancel, recursions + 1);
         }
         if core.settings.flag("distanceTrim") {
             self.trim(core, game);
@@ -291,8 +398,29 @@ impl BuilderProcess {
         }
 
         if core.settings.flag("allowInventory") {
-            // Moving items in the inventory to the hotbar needs the inventory behavior's slot moves, which are not
-            // ported: the hotbar is all that is used.
+            let mut useful_slots: Vec<usize> = Vec::new();
+            let mut no_valid_hotbar_option: Vec<Rc<BlockState>> = Vec::new();
+            'desired: for desired in &desirable_on_hotbar {
+                for (i, slot) in self.approx_placeable.iter().enumerate().take(9) {
+                    if valid(slot, Some(desired), true, &valid_settings) {
+                        useful_slots.push(i);
+                        continue 'desired;
+                    }
+                }
+                no_valid_hotbar_option.push(desired.clone());
+            }
+            'inventory: for i in 9..36 {
+                let Some(stack) = self.approx_placeable.get(i) else { break };
+                for desired in &no_valid_hotbar_option {
+                    if valid(stack, Some(desired), true, &valid_settings) {
+                        if !core.inventory.attempt_to_put_on_hotbar(game, &core.settings, i, &|s| useful_slots.contains(&s)) {
+                            // Awaiting an inventory move, so pause.
+                            return PathingCommand::RequestPause;
+                        }
+                        break 'inventory;
+                    }
+                }
+            }
         }
 
         let hotbar: Vec<Rc<BlockState>> = self.approx_placeable.iter().take(9).cloned().collect();

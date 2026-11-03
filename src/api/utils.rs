@@ -101,9 +101,36 @@ pub fn direction_vector(name: &str) -> Option<[i32; 3]> {
     }
 }
 
+thread_local! {
+    /// `censorCoordinates`, kept where the code that prints a coordinate can reach it.
+    static CENSOR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub fn set_censor(on: bool) {
+    CENSOR.with(|c| c.set(on));
+}
+
+/// `SettingsUtil.maybeCensor`: a coordinate as text, or `<censored>`.
+pub fn maybe_censor(coordinate: i32) -> String {
+    if CENSOR.with(std::cell::Cell::get) { "<censored>".to_owned() } else { coordinate.to_string() }
+}
+
 /// A block position as Baritone prints it.
 pub fn pos_label(p: Pos) -> String {
-    format!("BetterBlockPos{{x={},y={},z={}}}", p[0], p[1], p[2])
+    format!("BetterBlockPos{{x={},y={},z={}}}", maybe_censor(p[0]), maybe_censor(p[1]), maybe_censor(p[2]))
+}
+
+#[cfg(test)]
+mod censor_tests {
+    use super::*;
+
+    #[test]
+    fn coordinates_are_hidden_while_the_setting_is_on() {
+        set_censor(true);
+        assert_eq!(pos_label([1, 2, 3]), "BetterBlockPos{x=<censored>,y=<censored>,z=<censored>}");
+        set_censor(false);
+        assert_eq!(pos_label([1, 2, 3]), "BetterBlockPos{x=1,y=2,z=3}");
+    }
 }
 
 /// The column a distance away along a yaw (GoalXZ.fromDirection): 0 faces south, 90 west.

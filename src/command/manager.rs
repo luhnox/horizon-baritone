@@ -11,6 +11,7 @@ use super::baritone_cmd_nav as nav;
 use super::baritone_cmd_work as work;
 use super::baritone_goals::{rc, GoalBlock, GoalRef, GoalXZ, GoalYLevel};
 use super::baritone_gworld::{on_server, player_pos};
+use super::baritone_settings as settings;
 use super::baritone_utils::{feet_of, Pos};
 use super::Game;
 use horizon_client::text::{self, ClickEvent, Style, Text};
@@ -59,8 +60,60 @@ pub fn find(name: &str) -> Option<&'static Command> {
     registry().into_iter().find(|c| c.names.iter().any(|n| n.eq_ignore_ascii_case(name)))
 }
 
-/// Run a line typed after the prefix (`goto 10 64 -20`).
+/// `ExampleBaritoneControl.runCommand`: a line typed after the prefix (`goto 10 64 -20`). A setting's name is a command too
+/// (`allowBreak` toggles a boolean, `pathCutoffFactor 0.4` sets), and the command is echoed to the chat when echoCommands says so.
 pub fn run(b: &mut Baritone, game: &mut Game<'_>, line: &str) {
+    let trimmed = line.trim();
+    if trimmed.eq_ignore_ascii_case("damn") {
+        b.core.say(game, "daniel");
+        run_inner(b, game, line);
+        return;
+    }
+    if trimmed.eq_ignore_ascii_case("orderpizza") {
+        super::baritone_notification::open_uri("https://www.dominos.com/en/pages/order/");
+        run_inner(b, game, line);
+        return;
+    }
+    let (command, rest) = match trimmed.find(char::is_whitespace) {
+        Some(i) => (&trimmed[..i], &trimmed[i..]),
+        None => (trimmed, ""),
+    };
+    if !command.is_empty() {
+        let after = Args::parse(rest);
+        if let Some(def) = settings::find(command) {
+            if !after.has_any() {
+                log_ran_command(b, game, command, rest);
+                let line = if def.kind == settings::Kind::Bool { format!("set toggle {}", def.name) } else { format!("set {}", def.name) };
+                run_inner(b, game, &line);
+                return;
+            }
+            if after.has_exactly(1) {
+                log_ran_command(b, game, command, rest);
+                let line = format!("set {} {}", def.name, after.peek().unwrap_or(""));
+                run_inner(b, game, &line);
+                return;
+            }
+        }
+        // If the command exists, then handle echoing the input.
+        if find(command).is_some() {
+            log_ran_command(b, game, command, rest);
+        }
+    }
+    run_inner(b, game, line);
+}
+
+/// `logRanCommand`: `> goto 1 2 3`, a link that runs it again (`> goto ...` when censorRanCommands is on).
+fn log_ran_command(b: &mut Baritone, game: &mut Game<'_>, command: &str, rest: &str) {
+    if !b.core.settings.flag("echoCommands") {
+        return;
+    }
+    let message = format!("{command}{rest}");
+    let shown = if b.core.settings.flag("censorRanCommands") { format!("{command} ...") } else { message.clone() };
+    let line = clickable(&format!("> {shown}"), text::WHITE, ClickEvent::RunCommand(format!("{CLICK} {message}")), Text::literal("Click to rerun command"));
+    b.core.say_text(game, line);
+}
+
+fn run_inner(b: &mut Baritone, game: &mut Game<'_>, line: &str) {
     let mut args = Args::parse(line);
     let Some(name) = args.optional_string() else {
         let _ = help(b, game, &mut Args::parse(""));
@@ -75,11 +128,15 @@ pub fn run(b: &mut Baritone, game: &mut Game<'_>, line: &str) {
     };
     if !command.alias.is_empty() {
         let target = format!("{} {}", command.alias, args.rest_joined());
-        return run(b, game, target.trim());
+        return run_inner(b, game, target.trim());
     }
     let label = command.names[0];
     if let Err(CommandError(why)) = (command.run)(b, game, &mut args) {
         let _ = label;
+        if b.core.settings.flag("verboseCommandExceptions") {
+            // The Java prints the stack of the exception a bad argument raised; there is no stack here, so the game's log gets the reason.
+            eprintln!("[Baritone] {label}: {why}");
+        }
         b.core.say_red(game, &why);
     }
 }

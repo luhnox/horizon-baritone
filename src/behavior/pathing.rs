@@ -94,8 +94,17 @@ impl Core {
         if !self.settings.flag("chunkCaching") {
             return;
         }
+        // `onBlockChange` with repackOnAnyBlockChange: a chunk where a block the cache keeps track of was set is packed again.
+        let tracked = super::baritone::take_tracked_block_changes();
+        if self.settings.flag("repackOnAnyBlockChange") {
+            if let Some(data) = self.world_data.current.as_mut() {
+                for (cx, cz) in tracked {
+                    data.cache.queue_for_packing(cx, cz);
+                }
+            }
+        }
         self.world_data.queue_chunks(game);
-        let batch = self.world_data.take_batch(game, 4);
+        let batch = self.world_data.take_batch(game, 4, self.settings.int("chunkPackerQueueMaxSize").max(0) as usize);
         if !batch.is_empty() {
             let factory = self.states.clone();
             let (done, left) = self.with_calc(game, |calc, ctx, _| ctx.with_game(|g| super::baritone_world_data::WorldProvider::pack_batch(g, calc, &factory, batch, 4)));
@@ -173,6 +182,10 @@ impl Core {
             p.post_tick(ctx, s, command, hooks, ticks);
         });
         let lines: Vec<String> = self.pathing.log.drain(..).collect();
+        if std::mem::take(&mut self.pathing.arrived_at_goal) && self.settings.flag("disconnectOnArrival") {
+            // PathingBehavior: the path ended in the goal, so the world is left (`ctx.world().disconnect()`).
+            let _ = game.close_world();
+        }
         self.input.right_click_speed = self.settings.int("rightClickSpeed");
         self.input.block_break_speed = self.settings.int("blockBreakSpeed");
         self.input.apply(game);

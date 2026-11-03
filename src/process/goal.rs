@@ -120,6 +120,12 @@ impl Process for CustomGoalProcess {
                     // We're there.
                     let command = with_goal(&self.goal, PathingCommand::CancelAndSetGoal);
                     self.lost();
+                    if core.settings.flag("disconnectOnArrival") {
+                        let _ = game.close_world();
+                    }
+                    if core.settings.flag("notificationOnPathComplete") {
+                        core.notify("Pathing complete", false);
+                    }
                     return command;
                 }
                 with_goal(&self.goal, PathingCommand::SetGoalAndPath)

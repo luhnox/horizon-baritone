@@ -39,6 +39,8 @@ pub struct ValidSettings {
     pub build_ignore_existing: bool,
     pub build_ignore_direction: bool,
     pub build_ignore_properties: Vec<String>,
+    /// `buildValidSubstitutes`: the block a schematic asks for, and the blocks accepted in its place.
+    pub valid_substitutes: Vec<(String, Vec<String>)>,
 }
 
 impl ValidSettings {
@@ -51,6 +53,7 @@ impl ValidSettings {
             build_ignore_existing: s.flag("buildIgnoreExisting"),
             build_ignore_direction: s.flag("buildIgnoreDirection"),
             build_ignore_properties: s.list("buildIgnoreProperties"),
+            valid_substitutes: s.block_map("buildValidSubstitutes"),
         }
     }
 }
@@ -99,7 +102,9 @@ pub fn valid(current: &BlockState, desired: Option<&BlockState>, item_verify: bo
     if !current.is_air() && s.build_ignore_existing && !item_verify {
         return true;
     }
-    // buildValidSubstitutes is not read: the setting is one of the five the table cannot hold.
+    if !item_verify && s.valid_substitutes.iter().any(|(source, accepted)| source == desired.bare_name() && accepted.iter().any(|b| b == current.bare_name())) {
+        return true;
+    }
     if current.name == desired.name && current.props == desired.props {
         return true;
     }
@@ -249,6 +254,17 @@ mod tests {
 
     fn settings() -> ValidSettings {
         ValidSettings::of(&Settings::load(|_| None))
+    }
+
+    #[test]
+    fn a_valid_substitute_is_accepted_in_place_of_the_block_asked_for() {
+        let mut s = settings();
+        s.valid_substitutes = vec![("stone".to_owned(), vec!["cobblestone".to_owned(), "andesite".to_owned()])];
+        let stone = state("stone", "", &[]);
+        assert!(valid(&state("andesite", "", &[]), Some(&stone), false, &s));
+        assert!(!valid(&state("dirt", "", &[]), Some(&stone), false, &s));
+        // A stack that has to come out as stone itself is not satisfied by a substitute.
+        assert!(!valid(&state("andesite", "", &[]), Some(&stone), true, &s));
     }
 
     #[test]

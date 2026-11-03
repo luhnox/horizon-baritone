@@ -1,6 +1,6 @@
 [mod]
 id = "baritone"
-version = "1.1.17"
+version = "1.1.22"
 priority = 100
 
 # The commit this was written against: the Horizon the instance plays. It uses the native hook
@@ -55,6 +55,30 @@ id = "mod_builder_logic"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_builder_logic"
 source = "src/process/builder_logic.rs"
+
+[[module]]
+id = "mod_schematic_wrappers"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_schematic_wrappers"
+source = "src/schematic/wrappers.rs"
+
+[[module]]
+id = "mod_schematic_legacy"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_schematic_legacy"
+source = "src/schematic/legacy.rs"
+
+[[module]]
+id = "mod_notification"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_notification"
+source = "src/utils/notification.rs"
+
+[[module]]
+id = "mod_state_ops"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_state_ops"
+source = "src/game/state_ops.rs"
 
 [[module]]
 id = "mod_elytra_chunk"

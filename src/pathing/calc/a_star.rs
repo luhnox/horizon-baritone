@@ -158,6 +158,13 @@ pub struct AStarPathFinder {
 }
 
 impl AStarPathFinder {
+    /// `pathingMapDefaultSize`: how many nodes the table is made for. (`pathingMapLoadFactor` tunes the Java's open hash map and
+    /// has no counterpart in this one.)
+    pub fn with_map_size(mut self, size: usize) -> Self {
+        self.index = HashMap::with_capacity(size);
+        self
+    }
+
     /// `favoring` maps a position to the factor its moves cost (the previous path, avoided mobs).
     pub fn new(real_start: Pos, start: Pos, goal: GoalRef, favoring: HashMap<Pos, f64>, max_chunk_border_fetch: usize, minimum_improvement_repropagation: bool) -> Self {
         Self {

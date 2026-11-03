@@ -12,7 +12,7 @@ use super::baritone_goals::{rc, GoalRef, GoalXZ};
 use super::baritone_movement_helper as mh;
 use super::baritone_player_context::PlayerContext;
 use super::baritone_settings::Settings;
-use super::baritone_utils::Pos;
+use super::baritone_utils::{pos_label, Pos};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -86,6 +86,8 @@ struct Search {
 }
 
 pub struct PathingBehavior {
+    /// Set when a path ended in the goal; `Core::path_tick` takes it, to leave the world when disconnectOnArrival says so.
+    pub arrived_at_goal: bool,
     pub current: Option<PathExecutor>,
     pub next: Option<PathExecutor>,
     goal: Option<GoalRef>,
@@ -115,6 +117,7 @@ impl Default for PathingBehavior {
 impl PathingBehavior {
     pub fn new() -> Self {
         Self {
+            arrived_at_goal: false,
             current: None,
             next: None,
             goal: None,
@@ -458,6 +461,7 @@ impl PathingBehavior {
             self.debug(format!("All done. At {}", self.goal.as_ref().map_or("None".into(), |g| g.label())));
             self.queue(PathEvent::AtGoal);
             self.next = None;
+            self.arrived_at_goal = true;
             return;
         }
         let expected = self.expected_segment_start;
@@ -522,7 +526,7 @@ impl PathingBehavior {
         let previous = self.current.as_ref().map(|c| c.path.clone());
         let finder = self.create_pathfinder(ctx, settings, start, &goal, previous.as_ref());
         if talk_about_it {
-            self.debug(format!("Starting to search for path from {start:?} to {}", goal.label()));
+            self.debug(format!("Starting to search for path from {} to {}", pos_label(start), goal.label()));
         }
         self.in_progress = Some(Search {
             finder,
@@ -568,7 +572,7 @@ impl PathingBehavior {
         if sub[1] == 0 && sub[0].abs() <= 1 && sub[2].abs() <= 1 {
             real_start = feet;
         }
-        AStarPathFinder::new(real_start, start, transformed, favoring, settings.int("pathingMaxChunkBorderFetch").max(1) as usize, settings.flag("minimumImprovementRepropagation"))
+        AStarPathFinder::new(real_start, start, transformed, favoring, settings.int("pathingMaxChunkBorderFetch").max(1) as usize, settings.flag("minimumImprovementRepropagation")).with_map_size(settings.int("pathingMapDefaultSize").max(0) as usize)
     }
 
     /// Work on the search for a slice, and finish it if it is done or out of time.
@@ -645,7 +649,7 @@ impl PathingBehavior {
         if search.goal.is_in_goal(executor.path.dest()) {
             self.debug(format!("Finished finding a path from {:?} to {}. {} nodes considered", search.start, search.goal.label(), executor.path.num_nodes));
         } else {
-            self.debug(format!("Found path segment from {:?} towards {}. {} nodes considered", search.start, search.goal.label(), executor.path.num_nodes));
+            self.debug(format!("Found path segment from {} towards {}. {} nodes considered", pos_label(search.start), search.goal.label(), executor.path.num_nodes));
         }
     }
 
