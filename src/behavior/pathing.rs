@@ -114,10 +114,11 @@ impl Core {
         }
         let pause = PathingCommand::RequestPause;
         let command = if self.user_paused { Some(&pause) } else { command };
+        let hooks = self.path_hooks.take();
         self.drive(game, |p, ctx, s| {
-            p.pre_tick(ctx, s, command, real_process_changed, ticks);
+            p.pre_tick(ctx, s, command, hooks.clone(), real_process_changed, ticks);
             p.run_tick(ctx, s, ctx, ticks);
-            p.post_tick(ctx, s, command, ticks);
+            p.post_tick(ctx, s, command, hooks, ticks);
         });
         let lines: Vec<String> = self.pathing.log.drain(..).collect();
         self.input.apply(game);

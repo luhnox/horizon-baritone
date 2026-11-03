@@ -9,6 +9,8 @@ pub mod baritone_costs;
 pub mod baritone_goals;
 #[path = "pathing/helper.rs"]
 pub mod baritone_legacy_helper;
+#[path = "api/block_optional_meta.rs"]
+pub mod baritone_bom;
 #[path = "api/settings.rs"]
 pub mod baritone_settings;
 #[path = "selection/selection.rs"]

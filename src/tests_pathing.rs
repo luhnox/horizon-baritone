@@ -467,9 +467,9 @@ mod paper {
                 for tick in 0..400u64 {
                     pb.begin_tick(&player, &s, &BareHands);
                     let command = PathingCommand::SetGoalAndPath(goal.clone());
-                    pb.pre_tick(&player, &s, Some(&command), false, tick);
+                    pb.pre_tick(&player, &s, Some(&command), None, false, tick);
                     pb.run_tick(&player, &s, &BareHands, tick);
-                    pb.post_tick(&player, &s, Some(&command), tick);
+                    pb.post_tick(&player, &s, Some(&command), None, tick);
                     player.physics();
                     if player.player_feet() == [12, 64, 0] {
                         arrived = true;
@@ -510,9 +510,9 @@ mod paper {
                 for tick in 0..600u64 {
                     pb.begin_tick(&player, &s, &BareHands);
                     let command = PathingCommand::SetGoalAndPath(goal.clone());
-                    pb.pre_tick(&player, &s, Some(&command), false, tick);
+                    pb.pre_tick(&player, &s, Some(&command), None, false, tick);
                     pb.run_tick(&player, &s, &BareHands, tick);
-                    pb.post_tick(&player, &s, Some(&command), tick);
+                    pb.post_tick(&player, &s, Some(&command), None, tick);
                     player.physics();
                     if player.player_feet() == [14, 64, 0] {
                         arrived = true;
@@ -549,9 +549,9 @@ mod paper {
                 for tick in 0..600u64 {
                     pb.begin_tick(&player, &s, &BareHands);
                     let command = PathingCommand::SetGoalAndPath(goal.clone());
-                    pb.pre_tick(&player, &s, Some(&command), false, tick);
+                    pb.pre_tick(&player, &s, Some(&command), None, false, tick);
                     pb.run_tick(&player, &s, &BareHands, tick);
-                    pb.post_tick(&player, &s, Some(&command), tick);
+                    pb.post_tick(&player, &s, Some(&command), None, tick);
                     player.physics();
                     if player.player_feet() == [8, 64, 3] {
                         arrived = true;

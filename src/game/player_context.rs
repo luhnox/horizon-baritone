@@ -416,14 +416,14 @@ impl PlayerContext for GameCtx<'_, '_> {
             for z in cz - 2..=cz + 2 {
                 let Some(chunk) = g.world.chunks.get(&(x, z)) else { continue };
                 for (s, section) in chunk.sections.iter().enumerate() {
-                    if !section.blocks.maybe_has(|v| ids.contains(&(v.0 as u32))) {
+                    if !section.blocks.maybe_has(|v| ids.contains(&v)) {
                         continue;
                     }
                     let base = horizon_client::chunk::MIN_Y + s as i32 * 16;
                     for y in base..base + 16 {
                         for lz in 0..16 {
                             for lx in 0..16 {
-                                if ids.contains(&(chunk.get(lx, y, lz).0 as u32)) {
+                                if ids.contains(&chunk.get(lx, y, lz)) {
                                     found.push([x * 16 + lx, y, z * 16 + lz]);
                                 }
                             }

@@ -33,6 +33,12 @@ name = "baritone_legacy_helper"
 source = "src/pathing/helper.rs"
 
 [[module]]
+id = "mod_bom"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_bom"
+source = "src/api/block_optional_meta.rs"
+
+[[module]]
 id = "mod_settings"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_settings"

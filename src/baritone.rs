@@ -57,6 +57,8 @@ pub struct Core {
     pub pathing: PathingBehavior,
     /// LookBehavior's aim processor: the noise and the mouse steps of every aim.
     pub aim: AimProcessor,
+    /// What the process asking for a path overrides of the calculation context (PathingCommandContext).
+    pub path_hooks: Option<std::rc::Rc<dyn super::baritone_calculation_context::CostHooks>>,
     pub dig: DigState,
     pub cache: WorldCache,
     pub selections: SelectionManager,
@@ -87,6 +89,7 @@ impl Core {
             input: Input::default(),
             pathing: PathingBehavior::new(),
             aim: AimProcessor::new(super::baritone_command::now_ms()),
+            path_hooks: None,
             dig: DigState::default(),
             cache: WorldCache::default(),
             selections: SelectionManager::default(),
@@ -446,8 +449,11 @@ impl Baritone {
             if !p.is_active() {
                 continue;
             }
+            core.path_hooks = None;
             let cmd = p.on_tick(core, game, last_tick == Some(p.name()) && calc_failed, safe);
-            if !matches!(cmd, PathingCommand::Defer) {
+            if matches!(cmd, PathingCommand::Defer) {
+                core.path_hooks = None;
+            } else {
                 now = Some(p.name());
                 command = Some(cmd);
             }

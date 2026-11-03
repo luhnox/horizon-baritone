@@ -40,7 +40,22 @@ impl Default for PlayerFacts {
     }
 }
 
+/// What a process overrides of a CalculationContext (the subclasses BuilderCalculationContext,
+/// GetToBlockCalculationContext, MineCalculationContext and WalkOffCalculationContext of the Java): the cost
+/// of placing a block and the multiplier on breaking one. Each answers None to leave it to the context.
+pub trait CostHooks {
+    fn cost_of_placing_at(&self, _base: &CalculationContext, _x: i32, _y: i32, _z: i32, _current: &BlockState) -> Option<f64> {
+        None
+    }
+
+    fn break_cost_multiplier_at(&self, _base: &CalculationContext, _x: i32, _y: i32, _z: i32, _current: &BlockState) -> Option<f64> {
+        None
+    }
+}
+
+#[derive(Clone)]
 pub struct CalculationContext<'a> {
+    pub hooks: Option<Rc<dyn CostHooks>>,
     pub bsi: &'a dyn BlockStateInterface,
     pub tool_set: &'a dyn ToolSet,
     pub has_water_bucket: bool,
@@ -94,6 +109,7 @@ impl<'a> CalculationContext<'a> {
             water_speed = water_speed.min(SWIM_ONE_BLOCK_COST);
         }
         Self {
+            hooks: None,
             bsi,
             tool_set,
             has_water_bucket: facts.has_water_bucket,
@@ -144,7 +160,21 @@ impl<'a> CalculationContext<'a> {
         self.bsi.is_loaded(x, z)
     }
 
+    /// The same context with a process's overrides.
+    pub fn with_hooks(mut self, hooks: Option<Rc<dyn CostHooks>>) -> Self {
+        self.hooks = hooks;
+        self
+    }
+
     pub fn cost_of_placing_at(&self, x: i32, y: i32, z: i32, current: &BlockState) -> f64 {
+        if let Some(cost) = self.hooks.as_ref().and_then(|h| h.cost_of_placing_at(self, x, y, z, current)) {
+            return cost;
+        }
+        self.base_cost_of_placing_at(x, y, z, current)
+    }
+
+    /// `CalculationContext.costOfPlacingAt` itself, which an override may call as `super`.
+    pub fn base_cost_of_placing_at(&self, x: i32, y: i32, z: i32, current: &BlockState) -> f64 {
         let _ = y;
         if !self.has_throwaway {
             // Only true if allowPlace is true, see the constructor.
@@ -165,7 +195,15 @@ impl<'a> CalculationContext<'a> {
         self.place_block_cost
     }
 
-    pub fn break_cost_multiplier_at(&self, _x: i32, _y: i32, _z: i32, current: &BlockState) -> f64 {
+    pub fn break_cost_multiplier_at(&self, x: i32, y: i32, z: i32, current: &BlockState) -> f64 {
+        if let Some(m) = self.hooks.as_ref().and_then(|h| h.break_cost_multiplier_at(self, x, y, z, current)) {
+            return m;
+        }
+        self.base_break_cost_multiplier_at(x, y, z, current)
+    }
+
+    /// `CalculationContext.breakCostMultiplierAt` itself, which an override may call as `super`.
+    pub fn base_break_cost_multiplier_at(&self, _x: i32, _y: i32, _z: i32, current: &BlockState) -> f64 {
         if !self.allow_break && !self.allow_break_anyway.iter().any(|b| b == current.bare_name()) {
             return COST_INF;
         }

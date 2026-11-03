@@ -6,7 +6,7 @@
 use super::baritone_astar::{AStarPathFinder, Status};
 use super::baritone_avoidance::Avoidance;
 use super::baritone_calc_path::Path;
-use super::baritone_calculation_context::{CalculationContext, ToolSet};
+use super::baritone_calculation_context::{CalculationContext, CostHooks, ToolSet};
 use super::baritone_executor::{ExecEnv, PathExecutor};
 use super::baritone_goals::{rc, GoalRef, GoalXZ};
 use super::baritone_movement_helper as mh;
@@ -14,6 +14,7 @@ use super::baritone_player_context::PlayerContext;
 use super::baritone_settings::Settings;
 use super::baritone_utils::Pos;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// How many nodes a search expands in one tick: about what the Java manages in a tick on its own thread.
 pub const NODES_PER_TICK: usize = 2500;
@@ -78,6 +79,7 @@ struct Search {
     failure_timeout_ticks: u64,
     is_next_segment: bool,
     cancelled: bool,
+    hooks: Option<Rc<dyn CostHooks>>,
 }
 
 pub struct PathingBehavior {
@@ -94,6 +96,8 @@ pub struct PathingBehavior {
     calc_failed_last_tick: bool,
     in_progress: Option<Search>,
     expected_segment_start: Pos,
+    /// `context`: what the process in control overrides of the calculation context, for the searches.
+    hooks: Option<Rc<dyn CostHooks>>,
     events: Vec<PathEvent>,
     /// The debug lines of the Java's `logDebug`, for the caller to print when chatDebug is on.
     pub log: Vec<String>,
@@ -121,6 +125,7 @@ impl PathingBehavior {
             calc_failed_last_tick: false,
             in_progress: None,
             expected_segment_start: [0, 0, 0],
+            hooks: None,
             events: Vec::new(),
             log: Vec::new(),
         }
@@ -265,7 +270,7 @@ impl PathingBehavior {
     }
 
     /// PathingControlManager.preTick, given what `executeProcesses` returned.
-    pub fn pre_tick(&mut self, ctx: &dyn PlayerContext, settings: &Settings, command: Option<&PathingCommand>, real_process_changed: bool, ticks: u64) {
+    pub fn pre_tick(&mut self, ctx: &dyn PlayerContext, settings: &Settings, command: Option<&PathingCommand>, hooks: Option<Rc<dyn CostHooks>>, real_process_changed: bool, ticks: u64) {
         let Some(command) = command else {
             self.cancel_segment_if_safe(ctx);
             self.secret_internal_set_goal(None);
@@ -278,7 +283,7 @@ impl PathingBehavior {
         }
         match command {
             PathingCommand::SetGoalAndPause(g) => {
-                self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), ticks);
+                self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), hooks.clone(), ticks);
                 self.request_pause();
             }
             PathingCommand::RequestPause => self.request_pause(),
@@ -288,30 +293,30 @@ impl PathingBehavior {
             }
             PathingCommand::ForceRevalidateGoalAndPath(g) | PathingCommand::RevalidateGoalAndPath(g) => {
                 if !self.is_pathing() && !self.is_calculating() {
-                    self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), ticks);
+                    self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), hooks.clone(), ticks);
                 }
             }
             PathingCommand::SetGoalAndPath(g) => {
-                self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), ticks);
+                self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), hooks.clone(), ticks);
             }
             PathingCommand::Defer => {}
         }
     }
 
     /// PathingControlManager.postTick: after the path has been walked, cancel and recalculate if the goal changed.
-    pub fn post_tick(&mut self, ctx: &dyn PlayerContext, settings: &Settings, command: Option<&PathingCommand>, ticks: u64) {
+    pub fn post_tick(&mut self, ctx: &dyn PlayerContext, settings: &Settings, command: Option<&PathingCommand>, hooks: Option<Rc<dyn CostHooks>>, ticks: u64) {
         match command {
             Some(PathingCommand::ForceRevalidateGoalAndPath(g)) => {
                 if self.force_revalidate(g) || self.revalidate_goal(g) {
                     self.soft_cancel_if_safe();
                 }
-                self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), ticks);
+                self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), hooks.clone(), ticks);
             }
             Some(PathingCommand::RevalidateGoalAndPath(g)) => {
                 if settings.flag("cancelOnGoalInvalidation") && self.revalidate_goal(g) {
                     self.soft_cancel_if_safe();
                 }
-                self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), ticks);
+                self.secret_internal_set_goal_and_path(ctx, settings, Some(g.clone()), hooks.clone(), ticks);
             }
             _ => {}
         }
@@ -470,8 +475,9 @@ impl PathingBehavior {
     }
 
     /// secretInternalSetGoalAndPath: set the goal, and start a search if there is nothing going on.
-    pub fn secret_internal_set_goal_and_path(&mut self, ctx: &dyn PlayerContext, settings: &Settings, goal: Option<GoalRef>, ticks: u64) -> bool {
+    pub fn secret_internal_set_goal_and_path(&mut self, ctx: &dyn PlayerContext, settings: &Settings, goal: Option<GoalRef>, hooks: Option<Rc<dyn CostHooks>>, ticks: u64) -> bool {
         self.goal = goal;
+        self.hooks = hooks;
         let Some(goal) = self.goal.clone() else { return false };
         if goal.is_in_goal(ctx.player_feet()) {
             return false;
@@ -512,6 +518,7 @@ impl PathingBehavior {
             failure_timeout_ticks: (failure_ms.max(0) as u64).div_ceil(50),
             is_next_segment,
             cancelled: false,
+            hooks: self.hooks.clone(),
         });
     }
 
@@ -555,6 +562,8 @@ impl PathingBehavior {
             self.in_progress = None;
             return;
         }
+        let hooked = calc.clone().with_hooks(search.hooks.clone());
+        let calc = &hooked;
         let status = search.finder.run(calc, NODES_PER_TICK);
         let elapsed = ticks.saturating_sub(search.started_tick);
         let timed_out = elapsed >= search.failure_timeout_ticks || (!search.finder.failing && elapsed >= search.primary_timeout_ticks);
