@@ -1,6 +1,6 @@
 [mod]
 id = "baritone"
-version = "1.1.12"
+version = "1.1.14"
 priority = 100
 
 # The commit this was written against: the Horizon the instance plays. It uses the native hook
@@ -175,6 +175,12 @@ id = "mod_argument"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_argument"
 source = "src/command/argument.rs"
+
+[[module]]
+id = "mod_toolset"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_toolset"
+source = "src/game/toolset.rs"
 
 [[module]]
 id = "mod_gworld"

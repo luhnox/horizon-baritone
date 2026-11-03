@@ -5,17 +5,18 @@
 use super::Line;
 use std::{ops::ControlFlow, sync::Mutex, time::Instant};
 
-static LINES: Mutex<Vec<Line>> = Mutex::new(Vec::new());
+static LINES: Mutex<(Vec<Line>, Vec<Line>)> = Mutex::new((Vec::new(), Vec::new()));
 static CALLS: Mutex<(Option<Instant>, u32)> = Mutex::new((None, 0));
 
-pub fn set(lines: Vec<Line>) {
+/// The depth-tested lines, and the lines drawn over everything (`ignoreDepth` of the renderer's settings).
+pub fn set(depth: Vec<Line>, on_top: Vec<Line>) {
     if let Ok(mut held) = LINES.lock() {
-        *held = lines;
+        *held = (depth, on_top);
     }
 }
 
 pub fn take_over(lines: &[Line], camera: [f64; 3], view: glam::Mat4) -> ControlFlow<Vec<[f32; 8]>> {
-    let second = match CALLS.lock() {
+    let which = match CALLS.lock() {
         Ok(mut c) => {
             let now = Instant::now();
             if c.0.is_none_or(|t| now.duration_since(t).as_millis() > 100) {
@@ -23,14 +24,15 @@ pub fn take_over(lines: &[Line], camera: [f64; 3], view: glam::Mat4) -> ControlF
             }
             c.0 = Some(now);
             c.1 += 1;
-            (c.1 - 1) % 3 == 1
+            (c.1 - 1) % 3
         }
-        Err(_) => false,
+        Err(_) => 2,
     };
-    if !second {
+    // The first call is the depth-tested lines, the second the lines over everything, the third the crosshair axes.
+    if which > 1 {
         return ControlFlow::Continue(());
     }
-    let mine = LINES.lock().map(|l| l.clone()).unwrap_or_default();
+    let mine = LINES.lock().map(|l| if which == 0 { l.0.clone() } else { l.1.clone() }).unwrap_or_default();
     if mine.is_empty() {
         return ControlFlow::Continue(());
     }

@@ -72,7 +72,11 @@ pub fn dimension_of(id: &str) -> Dimension {
 pub fn world_name(game: &Game<'_>) -> String {
     match game.remote.as_ref() {
         Some(r) if r.session.address != "local" => sanitize(&r.session.address),
-        _ => sanitize(&game.level.name),
+        // The integrated server holds the name of the world (the client's own `level` is empty then, as `state` shows).
+        _ => match game.integrated.as_ref() {
+            Some(server) => sanitize(&server.world_name),
+            None => sanitize(&game.level.name),
+        },
     }
 }
 

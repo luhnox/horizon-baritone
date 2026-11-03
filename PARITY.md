@@ -255,7 +255,7 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 | InventoryBehavior | partial | src/behavior/inventory.rs: hotbar only |
 | LookBehavior | partial | src/behavior/look.rs |
 | PathingBehavior | ported | src/behavior/pathing_behavior.rs: the search runs in slices of 2500 nodes a tick, there being no second thread |
-| WaypointBehavior | partial | death waypoint only |
+| WaypointBehavior | partial | the death waypoint (doDeathWaypoints) is ported, the bed waypoint is missing; waypoints are kept per world |
 | ForkableRandom | n/a |  |
 
 ## main/cache
@@ -446,18 +446,18 @@ The settings are 243 of 252 (generated from Settings.java). The command layer (n
 |---|---|---|
 | BaritoneMath | n/a | f64 methods |
 | BaritoneProcessHelper | n/a |  |
-| BlockBreakHelper | partial | behavior/pathing.rs (dig_step) |
+| BlockBreakHelper | partial | behavior/pathing.rs (dig_step), behavior/input.rs (blockBreakSpeed delay) |
 | BlockPlaceHelper | partial | behavior/pathing.rs (click_block) |
 | BlockStateInterface | ported | src/utils/block_state_interface.rs, answered by game/player_context.rs |
 | BlockStateInterfaceAccessWrapper | n/a |  |
 | GuiClick | missing |  |
 | IRenderer | partial | src/game/render.rs |
 | InputOverrideHandler | ported | src/behavior/input.rs |
-| PathRenderer | partial | src/game/render.rs |
+| PathRenderer | partial | src/game/render.rs: path, goal, selections and elytra as lines (depth and on top); the GoalXZ beacon beam is a column of lines |
 | PathingCommandContext | ported | Core::path_hooks and CostHooks |
 | PathingControlManager | ported | Baritone::control_tick and pathing_behavior.rs (pre_tick, post_tick) |
 | PlayerMovementInput | n/a | the game reads keys |
-| ToolSet | ported | GameCtx::str_vs_block, game/player_context.rs |
+| ToolSet | ported | src/game/toolset.rs: calculateSpeedVsBlock, getBestSlot, silk and itemSaver as the Java |
 
 ## main/utils/accessor
 

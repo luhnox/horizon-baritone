@@ -7,7 +7,8 @@ use super::baritone_block_state::{BlockState, Class, FluidKind};
 use super::baritone_state_factory::StateFactory;
 use super::baritone_block_state_interface::BlockStateInterface;
 use super::baritone_calculation_context::{PlayerFacts, ToolSet};
-use super::baritone_gworld::{best_tool, break_progress, loaded};
+use super::baritone_gworld::loaded;
+use super::baritone_toolset::{str_vs_block, tool_slot_for, ToolSettings};
 use super::baritone_input::Input as InputHandler;
 use super::baritone_inventory as inv;
 use super::baritone_movement_state::Input;
@@ -36,6 +37,9 @@ pub struct GameCtx<'a, 'g> {
     factory: &'a StateFactory,
     cache: Option<&'a CachedWorld>,
     tool_ticks: RefCell<HashMap<u32, f64>>,
+    tools: ToolSettings,
+    /// `pathThroughCachedOnly`.
+    cached_only: bool,
 }
 
 impl<'a, 'g> GameCtx<'a, 'g> {
@@ -51,6 +55,8 @@ impl<'a, 'g> GameCtx<'a, 'g> {
             factory,
             cache,
             tool_ticks: RefCell::new(HashMap::new()),
+            tools: ToolSettings::of(settings),
+            cached_only: settings.flag("pathThroughCachedOnly"),
         }
     }
 
@@ -91,8 +97,8 @@ impl BlockStateInterface for GameCtx<'_, '_> {
         if y < horizon_client::chunk::MIN_Y || y >= horizon_client::chunk::MIN_Y + horizon_client::chunk::HEIGHT {
             return self.factory.state(g.res.facts().air);
         }
-        if !loaded(&g, [x, y, z]) {
-            // A chunk that is not loaded is what the cached world remembers of it, air where it remembers nothing.
+        if self.cached_only || !loaded(&g, [x, y, z]) {
+            // A chunk that is not loaded (or pathThroughCachedOnly) is what the cached world remembers of it, air where it remembers nothing.
             let remembered = self.cache.and_then(|c| c.get_block(x, y, z)).and_then(|name| self.factory.default_state_of(&name));
             return remembered.unwrap_or_else(|| self.factory.state(g.res.facts().air));
         }
@@ -131,8 +137,8 @@ impl ToolSet for GameCtx<'_, '_> {
         }
         let g = self.game.borrow();
         let id = horizon_world::registry::BlockStateId(state.id as _);
-        // The best tool's progress per tick (the Java's getStrVsBlock); none can break it: 0.
-        let value = break_progress(&g, id, self.settings.flag("autoTool")).map_or(0.0, |(progress, _)| progress);
+        // The best tool's progress per tick (the Java's getStrVsBlock); none can break it: 0 or less.
+        let value = str_vs_block(&g, id, &self.tools);
         self.tool_ticks.borrow_mut().insert(state.id, value);
         value
     }
@@ -354,7 +360,7 @@ impl PlayerContext for GameCtx<'_, '_> {
         }
         let mut g = self.game.borrow_mut();
         let state = g.world.block(pos[0], pos[1], pos[2]);
-        if let Some((_, Some(slot))) = best_tool(&g, state, true) {
+        if let Some(slot) = tool_slot_for(&g, state, &self.tools) {
             inv::select(&mut g, slot);
         }
     }

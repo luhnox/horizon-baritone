@@ -76,6 +76,12 @@ pub struct Input {
     dig_attack: bool,
     /// `rightClickSpeed`: the ticks between two right clicks, set from the settings each tick.
     pub right_click_speed: i32,
+    /// `blockBreakSpeed`: the ticks from one broken block to the next attack, set from the settings each tick.
+    pub block_break_speed: i32,
+    /// BlockBreakHelper.breakDelayTimer.
+    break_delay: i32,
+    /// The block under the crosshair while attacking: when it changes, the block was broken.
+    last_target: Option<[i32; 3]>,
     place_cooldown: i32,
 }
 
@@ -119,7 +125,21 @@ impl Input {
             }
         }
         HELD.with(|h| h.set(bits));
-        let attack = self.is_input_forced_down(In::ClickLeft) || self.dig_attack;
+        let mut attack = self.is_input_forced_down(In::ClickLeft) || self.dig_attack;
+        if self.break_delay > 0 {
+            self.break_delay -= 1;
+            attack = false;
+        }
+        if self.attacking {
+            // The block in front changed while attacking: it broke, so the next break waits (BASE_BREAK_DELAY is 1 tick).
+            let target = game.bar_look_target();
+            if self.last_target.is_some() && target != self.last_target {
+                self.break_delay = (self.block_break_speed - 1).max(0);
+            }
+            self.last_target = target;
+        } else {
+            self.last_target = None;
+        }
         if attack != self.attacking {
             game.bar_attack(attack);
             self.attacking = attack;

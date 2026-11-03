@@ -47,6 +47,13 @@ pub trait Goal {
     fn inverted_origin(&self) -> Option<GoalRef> {
         None
     }
+    /// How PathRenderer draws it.
+    fn render_kind(&self) -> GoalRender {
+        match self.render_pos() {
+            Some(pos) => GoalRender::Pos { pos, halved: false },
+            None => GoalRender::Nothing,
+        }
+    }
     /// What to draw for it.
     fn shapes(&self) -> Vec<Shape> {
         if let Some(p) = self.render_pos() {
@@ -69,6 +76,22 @@ pub enum Shape {
     Level(i32),
     /// Somewhere to keep away from.
     Avoid(Pos),
+}
+
+/// What PathRenderer does for a goal, in the order of its instanceof ladder.
+pub enum GoalRender {
+    /// `IGoalRenderPos`: the box at a block; GoalGetToBlock and GoalTwoBlocks draw it half as tall (`halved`).
+    Pos { pos: Pos, halved: bool },
+    /// `GoalXZ`.
+    Xz(i32, i32),
+    /// `GoalComposite`: each of its goals.
+    Composite(Vec<GoalRef>),
+    /// `GoalInverted`: its origin, in the inverted color.
+    Inverted(GoalRef),
+    /// `GoalYLevel`.
+    YLevel(i32),
+    /// Every other goal draws nothing.
+    Nothing,
 }
 
 pub type GoalRef = Rc<dyn Goal>;
@@ -155,6 +178,9 @@ impl Goal for GoalXZ {
         // ElytraBehavior changes the destination height by itself, depending on whether the player is above or below the roof.
         Some([self.0, 64, self.1])
     }
+    fn render_kind(&self) -> GoalRender {
+        GoalRender::Xz(self.0, self.1)
+    }
 }
 
 /// A height, anywhere.
@@ -172,6 +198,9 @@ impl Goal for GoalYLevel {
     }
     fn shapes(&self) -> Vec<Shape> {
         vec![Shape::Level(self.0)]
+    }
+    fn render_kind(&self) -> GoalRender {
+        GoalRender::YLevel(self.0)
     }
 }
 
@@ -239,6 +268,9 @@ impl Goal for GoalGetToBlock {
     fn label(&self) -> String {
         format!("GoalGetToBlock{{x={},y={},z={}}}", self.0[0], self.0[1], self.0[2])
     }
+    fn render_kind(&self) -> GoalRender {
+        GoalRender::Pos { pos: self.0, halved: true }
+    }
     fn render_pos(&self) -> Option<Pos> {
         Some(self.0)
     }
@@ -256,6 +288,9 @@ impl Goal for GoalTwoBlocks {
     }
     fn label(&self) -> String {
         format!("GoalTwoBlocks{{x={},y={},z={}}}", self.0[0], self.0[1], self.0[2])
+    }
+    fn render_kind(&self) -> GoalRender {
+        GoalRender::Pos { pos: self.0, halved: true }
     }
     fn render_pos(&self) -> Option<Pos> {
         Some(self.0)
@@ -446,6 +481,9 @@ impl Goal for GoalComposite {
     fn shapes(&self) -> Vec<Shape> {
         self.0.iter().take(40).flat_map(|g| g.shapes()).collect()
     }
+    fn render_kind(&self) -> GoalRender {
+        GoalRender::Composite(self.0.clone())
+    }
 }
 
 /// Anywhere but the goal: the heuristic climbs as the position nears it.
@@ -466,6 +504,9 @@ impl Goal for GoalInverted {
     }
     fn inverted_origin(&self) -> Option<GoalRef> {
         Some(self.0.clone())
+    }
+    fn render_kind(&self) -> GoalRender {
+        GoalRender::Inverted(self.0.clone())
     }
     fn shapes(&self) -> Vec<Shape> {
         self.0

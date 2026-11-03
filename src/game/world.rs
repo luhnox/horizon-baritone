@@ -3,6 +3,7 @@
 // touches the game's world; everything in pathing/ stays free of game types.
 use super::baritone_legacy_helper::{Cell, Terrain};
 use super::baritone_utils::{up, Pos};
+use super::baritone_toolset::{str_vs_block, ToolSettings};
 use super::Game;
 use horizon_client::blocks::Fluid;
 use horizon_core::geometry::Axis;
@@ -85,69 +86,11 @@ pub fn classify(game: &Game<'_>, state: BlockStateId) -> Cell {
     }
 }
 
-thread_local! {
-    /// `itemSaver`: tools with this much durability left or less are not used (None when the setting is off). Set once a
-    /// tick from the settings, since the tool choice is made far from where the settings are at hand.
-    static ITEM_SAVER: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
-}
-
-pub fn set_item_saver(threshold: Option<i32>) {
-    ITEM_SAVER.with(|s| s.set(threshold));
-}
-
-/// baritone.utils.ToolSet.getStrVsBlock: how much of the block one tick of the best tool at hand breaks
-/// (the breaking progress per tick, not rounded to whole ticks), and which hotbar slot that tool is in.
-/// None when nothing can break it.
-pub fn break_progress(game: &Game<'_>, state: BlockStateId, auto_tool: bool) -> Option<(f64, Option<usize>)> {
-    let facts = game.res.facts().get(state);
-    if facts.hardness < 0.0 {
-        return None;
-    }
-    if facts.hardness == 0.0 {
-        return Some((1.0, None));
-    }
-    let items = game.res.items();
-    let mut best: Option<(f64, Option<usize>)> = None;
-    let slots: Vec<usize> = if auto_tool { (0..9).collect() } else { vec![game.selected] };
-    // Bare hands, and each stack in the hotbar.
-    let candidates = std::iter::once((None, None)).chain(slots.into_iter().map(|i| (game.inventory.get(i).and_then(Option::as_ref), Some(i))));
-    let saver = ITEM_SAVER.with(std::cell::Cell::get);
-    for (stack, slot) in candidates {
-        // ToolSet.getBestSlot: a tool about to break is left alone when itemSaver is on.
-        if let (Some(threshold), Some(s)) = (saver, stack) {
-            let max = items.get(&s.item).map_or(0, |i| i.max_damage as i32);
-            if max > 1 && max - s.damage as i32 <= threshold {
-                continue;
-            }
-        }
-        let speed = f64::from(items.mining_speed(stack, &facts.name));
-        let harvest = !facts.requires_tool || items.correct_for_drops(stack, &facts.name);
-        let progress = speed / f64::from(facts.hardness) / if harvest { 30.0 } else { 100.0 };
-        if progress > 0.0 && best.is_none_or(|(b, _)| progress > b) {
-            best = Some((progress, slot));
-        }
-    }
-    best
-}
-
-/// The ticks to break `state` with the best of what is in the hotbar (or the held item alone, when
-/// the tool is not chosen), and which slot that is. None for what is not worth breaking: a fluid, or
-/// a block no tool at hand can harvest.
-pub fn best_tool(game: &Game<'_>, state: BlockStateId, auto_tool: bool) -> Option<(f64, Option<usize>)> {
-    let facts = game.res.facts().get(state);
-    if facts.block_entity || facts.fluid != Fluid::None {
-        return None;
-    }
-    let (progress, slot) = break_progress(game, state, auto_tool)?;
-    // Whole ticks, and a block that requires a tool nothing at hand harvests is skipped, as before.
-    if facts.requires_tool && facts.hardness > 0.0 {
-        let items = game.res.items();
-        let stacks = std::iter::once(None).chain((0..9).map(|i| game.inventory.get(i).and_then(Option::as_ref)));
-        if !stacks.into_iter().any(|st| items.correct_for_drops(st, &facts.name)) {
-            return None;
-        }
-    }
-    Some(((1.0 / progress).ceil(), slot))
+/// `getMinY()` and `getMaxY()` of the dimension the player is in.
+pub fn dimension_extent_of(game: &Game<'_>) -> (i32, i32) {
+    let dimension = game.native_player().map_or("minecraft:overworld", |p| p.dimension);
+    let (min_y, height) = super::baritone_elytra_behavior::dimension_extent(dimension);
+    (min_y, min_y + height - 1)
 }
 
 pub fn block_name(game: &Game<'_>, p: Pos) -> String {
@@ -177,14 +120,14 @@ pub struct GameTerrain<'a, 'g> {
     game: &'a Game<'g>,
     cells: &'a mut HashMap<u32, Cell>,
     avoid_breaking: &'a [String],
-    auto_tool: bool,
+    tools: ToolSettings,
     memo: HashMap<Pos, Cell>,
     dig: HashMap<u32, Option<f64>>,
 }
 
 impl<'a, 'g> GameTerrain<'a, 'g> {
-    pub fn new(game: &'a Game<'g>, cells: &'a mut HashMap<u32, Cell>, avoid_breaking: &'a [String], auto_tool: bool) -> Self {
-        Self { game, cells, avoid_breaking, auto_tool, memo: HashMap::new(), dig: HashMap::new() }
+    pub fn new(game: &'a Game<'g>, cells: &'a mut HashMap<u32, Cell>, avoid_breaking: &'a [String], tools: ToolSettings) -> Self {
+        Self { game, cells, avoid_breaking, tools, memo: HashMap::new(), dig: HashMap::new() }
     }
 }
 
@@ -210,14 +153,20 @@ impl Terrain for GameTerrain<'_, '_> {
     fn dig_cost(&mut self, p: Pos) -> Option<f64> {
         let state = self.game.world.block(p[0], p[1], p[2]);
         let game = self.game;
-        let (avoid, auto) = (self.avoid_breaking, self.auto_tool);
+        let (avoid, tools) = (self.avoid_breaking, &self.tools);
         *self.dig.entry(state.0 as u32).or_insert_with(|| {
             let name = game.res.facts().get(state).name.to_string();
             let bare = name.strip_prefix("minecraft:").unwrap_or(&name);
             if avoid.iter().any(|a| a == bare) || bare.ends_with("_bed") || bare.ends_with("shulker_box") {
                 return None;
             }
-            best_tool(game, state, auto).map(|(ticks, _)| ticks)
+            // MovementHelper.getMiningDurationTicks: a fluid cannot be broken, anything else takes 1 / strVsBlock.
+            let facts = game.res.facts().get(state);
+            if facts.fluid != Fluid::None {
+                return None;
+            }
+            let strength = str_vs_block(game, state, tools);
+            (strength > 0.0).then(|| 1.0 / strength)
         })
     }
 }

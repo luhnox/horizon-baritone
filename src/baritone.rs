@@ -35,7 +35,7 @@ use std::{
 };
 
 pub const ID: &str = "baritone";
-pub const VERSION: &str = "1.1.12";
+pub const VERSION: &str = "1.1.14";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -206,14 +206,17 @@ impl Core {
 
     fn prefix_text(&self) -> Text {
         let short = self.settings.flag("shortBaritonePrefix");
+        let name = if april_first_days() { "Baritoe" } else if short { "B" } else { "Baritone" };
         Text::colored("[", text::DARK_PURPLE)
-            .append(Text::colored(if short { "B" } else { "Baritone" }, text::LIGHT_PURPLE))
+            .append(Text::colored(name, text::LIGHT_PURPLE))
             .append(Text::colored("]", text::DARK_PURPLE))
             .append(" ")
     }
 
     pub fn say_text(&self, game: &mut Game<'_>, body: Text) {
-        let line = self.prefix_text().append(body);
+        // useMessageTag: the messages are marked by a tag instead of the prefix (Horizon's chat has no tag to draw, so the
+        // lines are plain).
+        let line = if self.settings.flag("useMessageTag") { body } else { self.prefix_text().append(body) };
         let focused = game.screen == Screen::Chat;
         game.ui.chat.add(&game.gui.atlas, line, None, ChatSource::Client, game.ticks, focused);
     }
@@ -263,7 +266,7 @@ impl Core {
             let mut ground = None;
             {
                 let g = &*game;
-                let mut terrain = super::baritone_gworld::GameTerrain::new(g, &mut self.cells, &self.avoid_breaking, true);
+                let mut terrain = super::baritone_gworld::GameTerrain::new(g, &mut self.cells, &self.avoid_breaking, super::baritone_toolset::ToolSettings::of(&self.settings));
                 for k in 0..=14 {
                     let c = [feet[0], feet[1] - k, feet[2]];
                     match super::baritone_legacy_helper::Terrain::cell(&mut terrain, c) {
@@ -297,7 +300,7 @@ impl Core {
         let above = [ground[0], ground[1] + 1, ground[2]];
         let water_there = {
             let g = &*game;
-            let mut terrain = super::baritone_gworld::GameTerrain::new(g, &mut self.cells, &self.avoid_breaking, true);
+            let mut terrain = super::baritone_gworld::GameTerrain::new(g, &mut self.cells, &self.avoid_breaking, super::baritone_toolset::ToolSettings::of(&self.settings));
             super::baritone_legacy_helper::Terrain::cell(&mut terrain, above) == Cell::Water
         };
         if !placed {
@@ -443,7 +446,6 @@ impl Baritone {
             }
             return;
         }
-        super::baritone_gworld::set_item_saver(if self.core.settings.flag("itemSaver") { Some(self.core.settings.int("itemSaverThreshold")) } else { None });
         self.core.cache.note_chunks(game);
         self.core.cache_tick(game);
         self.track_death(game);
@@ -551,6 +553,22 @@ impl Baritone {
     }
 }
 
+/// `Helper.getPrefix`'s April fools: the first three days of April, by the clock of the machine.
+fn april_first_days() -> bool {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    // Civil date from days since 1970 (Howard Hinnant's algorithm).
+    let z = secs.div_euclid(86_400) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let _ = era;
+    month == 4 && day <= 3
+}
+
 fn dimension_of(game: &Game<'_>) -> String {
     game.native_player().map_or("overworld", |p| p.dimension).to_owned()
 }
@@ -616,13 +634,13 @@ pub fn stop(game: &mut Game<'_>) {
         let Baritone { core, .. } = b;
         core.world_data.save(game, &core.settings);
     });
-    horizon_client::gizmos::baritone_lines::set(Vec::new());
+    horizon_client::gizmos::baritone_lines::set(Vec::new(), Vec::new());
 }
 
 fn publish(b: &mut Baritone, game: &Game<'_>) {
-    let mut out = Vec::new();
+    let mut out = super::baritone_render::Canvas::default();
     super::baritone_render::lines(b, game, &mut out);
-    horizon_client::gizmos::baritone_lines::set(out);
+    horizon_client::gizmos::baritone_lines::set(out.depth, out.top);
 }
 
 /// A line typed in chat: true when it was a Baritone command, so the server never sees it.

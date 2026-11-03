@@ -8,7 +8,8 @@ use super::baritone_aim::AimSettings;
 use super::baritone_calculation_context::{CalculationContext, CostHooks};
 use super::baritone_player_context::PlayerContext;
 use super::baritone_game_ctx::GameCtx;
-use super::baritone_gworld::{best_tool, block_name};
+use super::baritone_gworld::block_name;
+use super::baritone_toolset::{str_vs_block, tool_slot_for, ToolSettings};
 use super::baritone_inventory as inv;
 use super::baritone_pathing_behavior::PathingBehavior;
 use super::baritone_settings::Settings;
@@ -159,6 +160,7 @@ impl Core {
         });
         let lines: Vec<String> = self.pathing.log.drain(..).collect();
         self.input.right_click_speed = self.settings.int("rightClickSpeed");
+        self.input.block_break_speed = self.settings.int("blockBreakSpeed");
         self.input.apply(game);
         if self.settings.flag("chatDebug") { lines } else { Vec::new() }
     }
@@ -169,9 +171,11 @@ impl Core {
     /// Start breaking the block at `pos`. False when it cannot be broken.
     pub fn start_dig(&mut self, game: &mut Game<'_>, pos: Pos) -> bool {
         let before = game.world.block(pos[0], pos[1], pos[2]);
-        let Some((_, slot)) = best_tool(game, before, self.settings.flag("autoTool")) else {
+        let tools = ToolSettings::of(&self.settings);
+        if game.res.facts().get(before).fluid != horizon_client::blocks::Fluid::None || str_vs_block(game, before, &tools) <= 0.0 {
             return false;
-        };
+        }
+        let slot = tool_slot_for(game, before, &tools);
         self.input.release(game);
         if let Some(slot) = slot {
             inv::select(game, slot);

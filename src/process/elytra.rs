@@ -243,6 +243,11 @@ impl ElytraProcess {
         true
     }
 
+    /// The flight, for the renderer.
+    pub fn behavior(&self) -> Option<&ElytraBehavior> {
+        self.behavior.as_ref()
+    }
+
     pub fn current_destination(&self) -> Option<Pos> {
         self.behavior.as_ref().map(|b| b.destination)
     }

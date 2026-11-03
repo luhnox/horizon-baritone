@@ -167,6 +167,11 @@ impl PathingBehavior {
         self.current.is_some() || self.in_progress.is_some()
     }
 
+    /// What the search being run has so far, for the renderer: its best path so far, and the path to the node it considered last.
+    pub fn in_progress_paths(&self) -> Option<(Option<super::baritone_calc_path::Path>, Option<super::baritone_calc_path::Path>)> {
+        self.in_progress.as_ref().map(|s| (s.finder.best_so_far(0), s.finder.path_to_most_recent_node_considered()))
+    }
+
     pub fn in_progress_start(&self) -> Option<Pos> {
         self.in_progress.as_ref().map(|s| s.start)
     }
@@ -504,11 +509,16 @@ impl PathingBehavior {
             self.debug("no goal");
             return;
         };
-        let (primary_ms, failure_ms) = if self.current.is_none() {
+        let (mut primary_ms, mut failure_ms) = if self.current.is_none() {
             (settings.int("primaryTimeoutMS"), settings.int("failureTimeoutMS"))
         } else {
             (settings.int("planAheadPrimaryTimeoutMS"), settings.int("planAheadFailureTimeoutMS"))
         };
+        if settings.flag("slowPath") {
+            self.debug(format!("slowPath is on, path timeout will be {}ms instead of {primary_ms}ms", settings.int("slowPathTimeoutMS")));
+            primary_ms = settings.int("slowPathTimeoutMS");
+            failure_ms = primary_ms;
+        }
         let previous = self.current.as_ref().map(|c| c.path.clone());
         let finder = self.create_pathfinder(ctx, settings, start, &goal, previous.as_ref());
         if talk_about_it {
@@ -570,7 +580,9 @@ impl PathingBehavior {
         }
         let hooked = calc.clone().with_hooks(search.hooks.clone());
         let calc = &hooked;
-        let status = search.finder.run(calc, NODES_PER_TICK);
+        // slowPath sleeps slowPathTimeDelayMS before each node, which leaves a tick room for this many.
+        let nodes = if settings.flag("slowPath") { (50 / settings.int("slowPathTimeDelayMS").max(1) as usize).max(1) } else { NODES_PER_TICK };
+        let status = search.finder.run(calc, nodes);
         let elapsed = ticks.saturating_sub(search.started_tick);
         let timed_out = elapsed >= search.failure_timeout_ticks || (!search.finder.failing && elapsed >= search.primary_timeout_ticks);
         let result: Option<Option<Path>> = match status {
