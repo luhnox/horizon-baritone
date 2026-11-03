@@ -107,7 +107,7 @@ impl Process for FollowProcess {
     }
 
     fn priority(&self) -> f64 {
-        1.0
+        0.0
     }
 
     fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, _calc_failed: bool, _safe: bool) -> PathingCommand {

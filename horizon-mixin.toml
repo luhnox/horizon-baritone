@@ -1,6 +1,6 @@
 [mod]
 id = "baritone"
-version = "1.1.7"
+version = "1.1.8"
 priority = 100
 
 # The commit this was written against: the Horizon the instance plays. It uses the native hook
@@ -283,6 +283,12 @@ id = "mod_pathing"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_pathing"
 source = "src/behavior/pathing.rs"
+
+[[module]]
+id = "mod_p_backfill"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_p_backfill"
+source = "src/process/backfill.rs"
 
 [[module]]
 id = "mod_p_goal"

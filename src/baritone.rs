@@ -35,7 +35,7 @@ use std::{
 };
 
 pub const ID: &str = "baritone";
-pub const VERSION: &str = "1.1.7";
+pub const VERSION: &str = "1.1.8";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -310,6 +310,8 @@ pub struct Procs {
     pub farm: FarmProcess,
     pub build: BuilderProcess,
     pub elytra: ElytraProcess,
+    pub backfill: super::baritone_p_backfill::BackfillProcess,
+    pub pauser: super::baritone_p_backfill::InventoryPauserProcess,
 }
 
 impl Procs {
@@ -323,12 +325,14 @@ impl Procs {
             farm: FarmProcess::new(),
             build: BuilderProcess::new(),
             elytra: ElytraProcess::new(),
+            backfill: super::baritone_p_backfill::BackfillProcess::new(),
+            pauser: super::baritone_p_backfill::InventoryPauserProcess::new(),
         }
     }
 
-    /// The processes, highest priority first.
+    /// Every process, in the order they were registered.
     pub fn ordered(&mut self) -> Vec<&mut dyn Process> {
-        let mut all: Vec<&mut dyn Process> = vec![
+        vec![
             &mut self.goal,
             &mut self.get_to_block,
             &mut self.follow,
@@ -337,9 +341,14 @@ impl Procs {
             &mut self.explore,
             &mut self.mine,
             &mut self.build,
-        ];
-        all.sort_by(|a, b| b.priority().total_cmp(&a.priority()));
-        all
+            &mut self.backfill,
+            &mut self.pauser,
+        ]
+    }
+
+    /// The process with this name.
+    pub fn by_name(&mut self, name: &str) -> Option<&mut dyn Process> {
+        self.ordered().into_iter().find(|p| p.name() == name)
     }
 
     pub fn cancel_all(&mut self) {
@@ -360,11 +369,14 @@ pub struct Baritone {
     pub in_control: Option<&'static str>,
     /// What the process in control last asked for, for #proc.
     pub last_command: Option<String>,
+    /// The active processes, the one that became active last first, then by priority (`active` of the control
+    /// manager: ties are broken by which was added to the beginning of the list first).
+    active_order: Vec<&'static str>,
 }
 
 impl Baritone {
     fn new(game: &Game<'_>) -> Self {
-        Self { core: Core::new(game), procs: Procs::new(), in_control: None, last_command: None }
+        Self { core: Core::new(game), procs: Procs::new(), in_control: None, last_command: None, active_order: Vec::new() }
     }
 
     /// Stop everything: every process, the path and the keys.
@@ -409,7 +421,7 @@ impl Baritone {
         }
         let active = self.procs.any_active();
         // Typing in the chat presses W, A, S and D: only on the playing screen is that steering.
-        if active && game.screen == Screen::Playing && player_took_over(game) {
+        if active && self.core.pathing_busy() && game.screen == Screen::Playing && player_took_over(game) {
             self.cancel_everything(game);
             self.core.say_red(game, "Stopped: you took the controls.");
             return;
@@ -440,44 +452,57 @@ impl Baritone {
     /// processes, highest priority first; the first with something to say is in control and the rest are
     /// told they lost it. The pathing behavior then does what that process asked.
     fn control_tick(&mut self, game: &mut Game<'_>) {
-        let Baritone { core, procs, in_control, last_command } = self;
+        let Baritone { core, procs, in_control, last_command, active_order } = self;
         let last_tick = *in_control;
+        let mut priorities: Vec<(&'static str, f64, bool, bool)> = Vec::new();
         for p in procs.ordered() {
             p.refresh(core, game);
+            priorities.push((p.name(), p.priority(), p.is_active(), p.is_temporary()));
         }
+        // executeProcesses: a newly active process goes to the very front of the queue, a process that is not
+        // active leaves it; the queue is then sorted by priority (a stable sort).
+        for (name, _, active, _) in &priorities {
+            if *active {
+                if !active_order.contains(name) {
+                    active_order.insert(0, name);
+                }
+            } else {
+                active_order.retain(|n| n != name);
+            }
+        }
+        let priority_of = |name: &str| priorities.iter().find(|p| p.0 == name).map_or(0.0, |p| p.1);
+        active_order.sort_by(|a, b| priority_of(b).total_cmp(&priority_of(a)));
+        let temporary_of = |name: &str| priorities.iter().find(|p| p.0 == name).is_some_and(|p| p.3);
+
         let calc_failed = core.pathing.calc_failed_last_tick();
         let safe = core.pathing_safe_to_cancel();
         let mut command: Option<PathingCommand> = None;
         let mut now: Option<&'static str> = None;
-        let mut lost: Vec<&'static str> = Vec::new();
-        for p in procs.ordered() {
-            if command.is_some() {
-                if p.is_active() {
-                    lost.push(p.name());
-                }
-                continue;
-            }
-            if !p.is_active() {
-                continue;
-            }
+        let queue = active_order.clone();
+        for (i, name) in queue.iter().enumerate() {
+            let Some(p) = procs.by_name(name) else { continue };
             core.path_hooks = None;
-            let cmd = p.on_tick(core, game, last_tick == Some(p.name()) && calc_failed, safe);
+            let cmd = p.on_tick(core, game, last_tick == Some(*name) && calc_failed, safe);
             if matches!(cmd, PathingCommand::Defer) {
                 core.path_hooks = None;
-            } else {
-                now = Some(p.name());
-                command = Some(cmd);
+                continue;
             }
-        }
-        for p in procs.ordered() {
-            if lost.contains(&p.name()) || (last_tick == Some(p.name()) && now != Some(p.name()) && !p.is_active()) {
-                p.on_lost_control(core, game);
+            now = Some(*name);
+            command = Some(cmd);
+            // A temporary process leaves the others as they are; any other takes control from them.
+            if !temporary_of(name) {
+                for rest in &queue[i + 1..] {
+                    if let Some(q) = procs.by_name(rest) {
+                        q.on_lost_control(core, game);
+                    }
+                }
             }
+            break;
         }
         *in_control = now;
         *last_command = command.as_ref().map(PathingCommand::describe);
-        // Control changed from one real process to another that wants to do something.
-        let changed = now != last_tick && last_tick.is_some() && now.is_some();
+        // Control changed from a real process to another one that wants to do something.
+        let changed = now != last_tick && last_tick.is_some_and(|l| !temporary_of(l)) && command.as_ref().is_some_and(|c| !matches!(c, PathingCommand::RequestPause));
         let lines = core.path_tick(game, command.as_ref(), changed);
         for line in lines {
             core.say(game, &line);

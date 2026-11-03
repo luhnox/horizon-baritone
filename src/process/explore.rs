@@ -244,7 +244,7 @@ impl Process for ExploreProcess {
     }
 
     fn priority(&self) -> f64 {
-        0.2
+        0.0
     }
 
     fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, calc_failed: bool, _safe: bool) -> PathingCommand {

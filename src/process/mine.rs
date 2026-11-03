@@ -404,7 +404,7 @@ impl Process for MineProcess {
     }
 
     fn priority(&self) -> f64 {
-        0.5
+        0.0
     }
 
     fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, calc_failed: bool, is_safe_to_cancel: bool) -> PathingCommand {

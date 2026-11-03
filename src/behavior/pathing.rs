@@ -26,6 +26,10 @@ pub trait Process {
     fn is_active(&self) -> bool;
     /// The one with the higher priority is asked first and wins.
     fn priority(&self) -> f64;
+    /// A temporary process (combat pause, backfill) may keep control without the ones under it being cancelled.
+    fn is_temporary(&self) -> bool {
+        false
+    }
     /// Bring `is_active` up to date: the Java's `isActive` looks at the world each time it is asked.
     fn refresh(&mut self, _core: &mut Core, _game: &mut Game<'_>) {}
     fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, calc_failed: bool, safe_to_cancel: bool) -> PathingCommand;

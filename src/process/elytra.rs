@@ -68,7 +68,7 @@ impl Process for ElytraProcess {
     }
 
     fn priority(&self) -> f64 {
-        2.8
+        0.0 // higher priority than CustomGoalProcess
     }
 
     fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, _calc_failed: bool, _safe: bool) -> PathingCommand {
