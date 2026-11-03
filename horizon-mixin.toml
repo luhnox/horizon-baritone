@@ -105,6 +105,30 @@ name = "baritone_elytra_search"
 source = "src/process/elytra/path_finder.rs"
 
 [[module]]
+id = "mod_elytra_segment"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_segment"
+source = "src/process/elytra/segment.rs"
+
+[[module]]
+id = "mod_elytra_flight"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_flight"
+source = "src/process/elytra/flight.rs"
+
+[[module]]
+id = "mod_elytra_build_limit"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_build_limit"
+source = "src/process/elytra/build_limit.rs"
+
+[[module]]
+id = "mod_elytra_path_manager"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_path_manager"
+source = "src/process/elytra/path_manager.rs"
+
+[[module]]
 id = "mod_cached_world"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_cached_world"

@@ -31,6 +31,14 @@ pub mod baritone_elytra_pathfinder;
 pub mod baritone_elytra_region;
 #[path = "process/elytra/path_finder.rs"]
 pub mod baritone_elytra_search;
+#[path = "process/elytra/segment.rs"]
+pub mod baritone_elytra_segment;
+#[path = "process/elytra/flight.rs"]
+pub mod baritone_elytra_flight;
+#[path = "process/elytra/build_limit.rs"]
+pub mod baritone_elytra_build_limit;
+#[path = "process/elytra/path_manager.rs"]
+pub mod baritone_elytra_path_manager;
 #[path = "cache/cached_world.rs"]
 pub mod baritone_cached_world;
 #[path = "api/settings.rs"]
