@@ -69,6 +69,8 @@ pub struct NetherPathfinder {
     seed: i64,
     dimension: Dimension,
     pub max_height: i32,
+    /// The world y that the octrees start at, which the region files' heights are shifted by.
+    min_y: i32,
 }
 
 impl NetherPathfinder {
@@ -88,7 +90,13 @@ impl NetherPathfinder {
             seed,
             dimension,
             max_height,
+            min_y: 0,
         })
+    }
+
+    pub fn with_min_y(mut self, min_y: i32) -> Self {
+        self.min_y = min_y;
+        self
     }
 
     pub fn seed(&self) -> i64 {
@@ -249,7 +257,7 @@ impl NetherPathfinder {
             return 0;
         }
         let started = Instant::now();
-        let read = region::load(source.as_ref(), region_x, region_z, self.dimension, &mut |x, z, chunk| {
+        let read = region::load(source.as_ref(), region_x, region_z, self.min_y, &mut |x, z, chunk| {
             self.chunks.lock().expect("chunk table").entry(key(x, z)).or_insert_with(|| Arc::new(Entry { chunk: Arc::new(chunk), x, z, from_caller: true }));
         });
         if read { started.elapsed().as_millis() as u64 } else { 0 }

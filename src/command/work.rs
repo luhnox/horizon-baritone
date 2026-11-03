@@ -130,14 +130,13 @@ pub const COMMANDS: &[Command] = &[
         names: &["elytra"],
         short: "elytra time",
         long: &[
-            "The elytra command takes off, steers to the goal, fires a firework rocket when it slows down, keeps above the highest thing ahead, glides in, and walks the last stretch.",
-            "It needs an elytra worn and, to go far, firework rockets in the hotbar.",
+            "The elytra command tells baritone to, in the nether, automatically fly to the current goal.",
             "",
             "Usage:",
-            "> elytra - fly to the most recent goal (set one with #goal, or #goto)",
-            "> elytra reset - start again towards the same goal",
-            "> elytra repack - forget which chunks were seen",
-            "> elytra supported - say whether it can run",
+            "> elytra - fly to the current goal",
+            "> elytra reset - Resets the state of the process, but will try to keep flying to the same goal.",
+            "> elytra repack - Queues all of the chunks in render distance to be given to the native library.",
+            "> elytra supported - Tells you if baritone ships a native library that is compatible with your PC.",
         ],
         alias: "",
         run: elytra,
@@ -329,39 +328,82 @@ fn find(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
     Ok(())
 }
 
+const OLD_2B2T_SEED: i64 = -4_100_785_268_875_389_365;
+const NEW_2B2T_SEED: i64 = 146_008_555_100_680;
+
+fn on_2b2t(game: &Game<'_>) -> bool {
+    game.remote.as_ref().is_some_and(|r| r.session.address.to_lowercase().contains("2b2t.org"))
+}
+
+/// `ElytraCommand.gatekeep`: what the first #elytra says until elytraTermsAccepted is on.
+fn elytra_gatekeep(b: &mut Baritone, game: &mut Game<'_>) {
+    let say = |b: &Baritone, game: &mut Game<'_>, s: &str| b.core.say(game, s);
+    say(b, game, "To disable this message, enable the setting elytraTermsAccepted");
+    say(b, game, "Baritone Elytra is an experimental feature. It is intended for long distance travel in the Nether but will also work in the Overworld, using fireworks for vanilla boost. It will not work with any other mods (\"hacks\") for non-vanilla boost. If you want Baritone to attempt to take off from the ground for you, you can enable the elytraAutoJump setting (not advisable on laggy servers!). If you want Baritone to go slower, enable the elytraConserveFireworks setting and/or decrease the elytraFireworkSpeed setting.");
+    say(b, game, "Baritone Elytra for use in the Nether wants to know the seed of the world you are in. If it doesn't have the correct seed, it will frequently backtrack. It uses the seed to generate terrain far beyond what you can see, since terrain obstacles in the Nether can be much larger than your render distance.");
+    let seed = b.core.settings.long("elytraNetherSeed");
+    let predict = b.core.settings.flag("elytraPredictTerrain");
+    if on_2b2t(game) {
+        say(b, game, "It looks like you're on 2b2t. Terrain prediction can be used but new nether terrain can not be predicted on 2b2t.");
+        suggest_2b2t_seeds(b, game);
+        if !predict {
+            say(b, game, "#elytraPredictTerrain is currently disabled.");
+        } else if seed == NEW_2B2T_SEED {
+            say(b, game, "You are using the newer seed.");
+        } else if seed == OLD_2B2T_SEED {
+            say(b, game, "You are using the older seed.");
+        } else {
+            let _ = b.core.settings.set("elytraNetherSeed", &NEW_2B2T_SEED.to_string());
+            say(b, game, "Defaulting to the newer seed.");
+        }
+    } else if seed == NEW_2B2T_SEED {
+        say(b, game, "Baritone doesn't know the seed of your world. Set it with: #set elytraNetherSeed seedgoeshere");
+        say(b, game, "For the time being, elytraPredictTerrain is defaulting to false since the seed is unknown.");
+        let _ = b.core.settings.set("elytraPredictTerrain", "false");
+    } else if predict {
+        say(b, game, &format!("Baritone Elytra is predicting terrain assuming that {seed} is the correct seed. Change that with #set elytraNetherSeed seedgoeshere, or disable it with #set elytraPredictTerrain false"));
+    } else {
+        say(b, game, "Baritone Elytra is not predicting terrain. If you don't know the seed, this is the correct thing to do. If you do know the seed, input it with #set elytraNetherSeed seedgoeshere, and then enable it with #set elytraPredictTerrain true");
+    }
+}
+
+fn suggest_2b2t_seeds(b: &mut Baritone, game: &mut Game<'_>) {
+    b.core.say(game, &format!("Within a few hundred blocks of spawn/axis/highways/etc, the terrain is too fragmented to be predictable. Baritone Elytra will still work, just with backtracking. However, once you get more than a few thousand blocks out, you should try the older seed (#set elytraNetherSeed {OLD_2B2T_SEED}). Once you're further out into newer terrain generation (this includes everything up through 1.12), you should try the newer seed (#set elytraNetherSeed {NEW_2B2T_SEED}). Once you get into 1.19 terrain, the terrain becomes unpredictable again, due to custom non-vanilla generation, and you should set #elytraPredictTerrain to false."));
+}
+
 fn elytra(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     if args.has_exactly(1) && args.peek() == Some("supported") {
-        let ok = game.glider_worn();
-        b.core.say(game, if ok { "yes" } else { "no: wear an elytra first" });
+        b.core.say(game, "yes");
         return Ok(());
     }
-    here(game)?;
     if !args.has_any() {
-        if !game.glider_worn() {
-            return Err(CommandError::new("Wear an elytra first."));
+        if b.core.settings.flag("elytraTermsAccepted") {
+            if on_2b2t(game) && b.core.settings.flag("elytraPredictTerrain") {
+                let seed = b.core.settings.long("elytraNetherSeed");
+                if seed != NEW_2B2T_SEED && seed != OLD_2B2T_SEED {
+                    b.core.say(game, "It looks like you're on 2b2t, but elytraNetherSeed is incorrect.");
+                    suggest_2b2t_seeds(b, game);
+                }
+            }
+        } else {
+            elytra_gatekeep(b, game);
         }
         let goal = b.procs.goal.most_recent_goal().cloned().ok_or_else(|| CommandError::new("No goal has been set"))?;
-        let (x, z) = goal.column().ok_or_else(|| CommandError::new("The goal has no place to fly to."))?;
-        if !b.core.settings.flag("elytraTermsAccepted") {
-            b.core.say(game, "This elytra is simple: a straight flight at a safe height with firework rockets for speed, then a glide in. It is not Baritone's Nether pathfinder, so it will not thread a canyon or know the seed. #set elytraTermsAccepted true hides this message.");
-        }
+        here(game)?;
         begin(b, game)?;
-        if super::baritone_inventory::firework_slot(game).is_none() {
-            b.core.say(game, "No firework rockets in the hotbar: it will only glide.");
-        }
-        b.procs.elytra.fly_to(x, z, game.ticks);
-        return Ok(());
+        let Baritone { core, procs, .. } = b;
+        return procs.elytra.path_to(core, game, &goal).map_err(CommandError::new);
     }
     let action = args.string("an action")?;
     match action.as_str() {
         "reset" => {
-            if !b.procs.elytra.restart(game.ticks) {
-                return Err(CommandError::new("Not flying anywhere"));
-            }
+            here(game)?;
+            let Baritone { core, procs, .. } = b;
+            procs.elytra.reset_state(core, game).map_err(CommandError::new)?;
             b.core.say(game, "Reset state but still flying to same goal");
         }
         "repack" => {
-            b.core.cache.forget();
+            b.procs.elytra.repack(game);
             b.core.say(game, "Queued all loaded chunks for repacking");
         }
         _ => return Err(CommandError::new("Invalid action")),

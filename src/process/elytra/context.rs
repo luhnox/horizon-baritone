@@ -38,7 +38,7 @@ impl NetherPathfinderContext {
         if !allow_above_roof && dimension == Dimension::Nether {
             height = height.min(128);
         }
-        let npf = NetherPathfinder::new(seed, cache, dimension, height)?;
+        let npf = NetherPathfinder::new(seed, cache, dimension, height)?.with_min_y(min_y);
         Ok(Self { npf: Arc::new(npf), min_y, max_height: height, seed })
     }
 

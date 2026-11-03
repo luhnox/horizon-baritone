@@ -54,6 +54,10 @@ pub trait CostHooks {
     fn break_cost_multiplier_at(&self, _base: &CalculationContext, _x: i32, _y: i32, _z: i32, _current: &BlockState) -> Option<f64> {
         None
     }
+
+    fn place_bucket_cost(&self, _base: &CalculationContext) -> Option<f64> {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -224,6 +228,9 @@ impl<'a> CalculationContext<'a> {
     }
 
     pub fn place_bucket_cost(&self) -> f64 {
+        if let Some(cost) = self.hooks.as_ref().and_then(|h| h.place_bucket_cost(self)) {
+            return cost;
+        }
         self.place_block_cost
     }
 

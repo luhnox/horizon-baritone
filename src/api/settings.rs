@@ -340,6 +340,10 @@ impl Settings {
     pub fn int(&self, name: &str) -> i32 {
         self.get(name).parse().unwrap_or(0)
     }
+    /// A 64 bit setting (a seed): `int` would read anything past 32 bits as 0.
+    pub fn long(&self, name: &str) -> i64 {
+        self.get(name).parse().unwrap_or(0)
+    }
     pub fn float(&self, name: &str) -> f64 {
         self.get(name).parse().unwrap_or(0.0)
     }

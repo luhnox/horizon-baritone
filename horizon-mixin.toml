@@ -111,6 +111,12 @@ name = "baritone_elytra_segment"
 source = "src/process/elytra/segment.rs"
 
 [[module]]
+id = "mod_elytra_behavior"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_elytra_behavior"
+source = "src/process/elytra/behavior.rs"
+
+[[module]]
 id = "mod_elytra_flight"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_elytra_flight"

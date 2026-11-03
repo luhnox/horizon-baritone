@@ -16,7 +16,7 @@ use std::time::Instant;
 
 /// The region files of one world and dimension: `r.X.Z.bcr`, gzipped.
 pub struct FileStore {
-    dir: PathBuf,
+    pub dir: PathBuf,
 }
 
 impl FileStore {
@@ -28,6 +28,10 @@ impl FileStore {
 impl super::baritone_elytra_region::RegionSource for FileStore {
     fn read_region(&self, rx: i32, rz: i32) -> Option<Vec<u8>> {
         RegionStore::load(self, rx, rz)
+    }
+
+    fn layout(&self) -> super::baritone_elytra_region::Layout {
+        super::baritone_elytra_region::Layout { height: horizon_client::chunk::HEIGHT as usize, min_y: horizon_client::chunk::MIN_Y }
     }
 }
 
@@ -67,6 +71,7 @@ pub fn dimension_of(id: &str) -> Dimension {
 /// `WorldData`: the cached world of one world and dimension.
 pub struct WorldData {
     pub key: String,
+    pub dir: PathBuf,
     pub cache: CachedWorld,
     seen: HashSet<(i32, i32)>,
     revision: u64,
@@ -190,8 +195,8 @@ impl WorldProvider {
         }
         self.save(game, settings);
         let dir = game.native_data_dir(super::baritone::ID).join("cache").join(&world).join(sanitize(dimension));
-        let cache = CachedWorld::new(dimension_of(dimension), Box::new(FileStore { dir }));
-        self.current = Some(WorldData { key, cache, seen: HashSet::new(), revision: 0, last_save: game.ticks, last_requeue: game.ticks });
+        let cache = CachedWorld::new(dimension_of(dimension), Box::new(FileStore { dir: dir.clone() }));
+        self.current = Some(WorldData { key, dir, cache, seen: HashSet::new(), revision: 0, last_save: game.ticks, last_requeue: game.ticks });
     }
 
     /// Queue the chunks that appeared since the last look, and re-queue the ones near the player now and then (the

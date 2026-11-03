@@ -35,6 +35,10 @@ pub trait Goal {
     fn render_pos(&self) -> Option<Pos> {
         None
     }
+    /// Where #elytra flies for this goal: a GoalBlock's block, a GoalXZ's column at y 64; no other goal can be flown to.
+    fn elytra_target(&self) -> Option<Pos> {
+        None
+    }
     /// The column this goal is in, if it has one (#elytra flies to it).
     fn column(&self) -> Option<(i32, i32)> {
         self.render_pos().map(|p| (p[0], p[2]))
@@ -116,6 +120,9 @@ impl Goal for GoalBlock {
     fn render_pos(&self) -> Option<Pos> {
         Some(self.0)
     }
+    fn elytra_target(&self) -> Option<Pos> {
+        Some(self.0)
+    }
 }
 
 /// A column, any height.
@@ -143,6 +150,10 @@ impl Goal for GoalXZ {
     }
     fn column(&self) -> Option<(i32, i32)> {
         Some((self.0, self.1))
+    }
+    fn elytra_target(&self) -> Option<Pos> {
+        // ElytraBehavior changes the destination height by itself, depending on whether the player is above or below the roof.
+        Some([self.0, 64, self.1])
     }
 }
 
