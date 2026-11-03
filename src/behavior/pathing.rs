@@ -75,6 +75,7 @@ impl Core {
     /// loaded, pack as many as there is time for, and save now and then.
     pub fn cache_tick(&mut self, game: &mut Game<'_>) {
         self.world_data.follow(game, &self.settings);
+        self.follow_waypoints(game);
         if !self.settings.flag("chunkCaching") {
             return;
         }

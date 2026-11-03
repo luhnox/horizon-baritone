@@ -68,6 +68,14 @@ pub fn dimension_of(id: &str) -> Dimension {
     }
 }
 
+/// The folder name of the world being played in: the server's address, or the single-player world's name.
+pub fn world_name(game: &Game<'_>) -> String {
+    match game.remote.as_ref() {
+        Some(r) if r.session.address != "local" => sanitize(&r.session.address),
+        _ => sanitize(&game.level.name),
+    }
+}
+
 /// `WorldData`: the cached world of one world and dimension.
 pub struct WorldData {
     pub key: String,
@@ -185,10 +193,7 @@ impl WorldProvider {
     /// Switch to the world and dimension being played in (saving the one left), when it changed.
     pub fn follow(&mut self, game: &Game<'_>, settings: &super::baritone_settings::Settings) {
         let dimension = game.native_player().map_or("minecraft:overworld", |p| p.dimension);
-        let world = match game.remote.as_ref() {
-            Some(r) if r.session.address != "local" => sanitize(&r.session.address),
-            _ => sanitize(&game.level.name),
-        };
+        let world = world_name(game);
         let key = format!("{world}/{}", sanitize(dimension));
         if self.current.as_ref().is_some_and(|c| c.key == key) {
             return;

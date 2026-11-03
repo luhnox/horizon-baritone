@@ -35,7 +35,7 @@ use std::{
 };
 
 pub const ID: &str = "baritone";
-pub const VERSION: &str = "1.1.11";
+pub const VERSION: &str = "1.1.12";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -74,6 +74,8 @@ pub struct Core {
     /// Waypoints that were deleted or cleared, for #wp restore.
     pub deleted_waypoints: Vec<Waypoint>,
     pub waypoints: Waypoints,
+    /// The world the waypoints in `waypoints` belong to.
+    pub waypoints_world: Option<String>,
     pub cells: HashMap<u32, Cell>,
     pub avoid_breaking: Vec<String>,
     pub throwaway: Vec<String>,
@@ -87,7 +89,7 @@ pub struct Core {
 impl Core {
     fn new(game: &Game<'_>) -> Self {
         let settings = Settings::load(|name| game.native_setting(ID, name));
-        let waypoints = Waypoints::from_text(&game.native_setting(ID, "waypoints").unwrap_or_default());
+        let waypoints = Waypoints::from_text("");
         let mut core = Self {
             settings,
             input: Input::default(),
@@ -104,6 +106,7 @@ impl Core {
             clipboard_offset: [0, 0, 0],
             deleted_waypoints: Vec::new(),
             waypoints,
+            waypoints_world: None,
             cells: HashMap::new(),
             avoid_breaking: Vec::new(),
             throwaway: Vec::new(),
@@ -137,8 +140,44 @@ impl Core {
         self.refresh();
     }
 
+    /// The waypoints file of the world being played in. The Java keeps them with each world; one global list would show a
+    /// bed or a death of another world, and #home or #wp goto would walk to coordinates that mean nothing here.
+    fn waypoints_file(game: &Game<'_>) -> std::path::PathBuf {
+        game.native_data_dir(ID).join("cache").join(super::baritone_world_data::world_name(game)).join("waypoints.txt")
+    }
+
     pub fn save_waypoints(&self, game: &Game<'_>) {
-        game.native_set_setting(ID, "waypoints", &self.waypoints.to_text());
+        let file = Self::waypoints_file(game);
+        if let Some(dir) = file.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&file, self.waypoints.to_text());
+    }
+
+    /// Switch to the waypoints of the world now being played in. The one list older versions kept for every world goes to
+    /// the first world opened after the change, once, so nothing is lost.
+    pub fn follow_waypoints(&mut self, game: &Game<'_>) {
+        let world = super::baritone_world_data::world_name(game);
+        if self.waypoints_world.as_deref() == Some(world.as_str()) {
+            return;
+        }
+        self.waypoints_world = Some(world);
+        let file = Self::waypoints_file(game);
+        let text = match std::fs::read_to_string(&file) {
+            Ok(t) => t,
+            Err(_) => {
+                let legacy = game.native_setting(ID, "waypoints").unwrap_or_default();
+                if !legacy.trim().is_empty() && game.native_setting(ID, "waypoints_moved").is_none() {
+                    game.native_set_setting(ID, "waypoints_moved", "1");
+                    legacy
+                } else {
+                    String::new()
+                }
+            }
+        };
+        self.waypoints = Waypoints::from_text(&text);
+        self.deleted_waypoints.clear();
+        self.save_waypoints(game);
     }
 
     /// Every block name the game knows, sorted, for commands to check a name against.
