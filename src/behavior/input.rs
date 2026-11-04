@@ -5,7 +5,8 @@
 // the hook that lets Baritone keep walking with a screen open (see `through`).
 use super::baritone_movement_state::Input as In;
 use super::{Game, Screen};
-use std::cell::Cell;
+use horizon_client::chat::ChatScreen;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use winit::keyboard::KeyCode;
 
@@ -24,6 +25,9 @@ thread_local! {
     static PLAYER_KEYS: Cell<Option<[bool; 7]>> = const { Cell::new(None) };
     /// The screen the tick turned into the playing one, to give back.
     static BORROWED: Cell<Option<Screen>> = const { Cell::new(None) };
+    /// The chat box, kept aside while the chat is the borrowed screen: the game drops the box of a chat screen when the screen is
+    /// not the chat (`tick_in_bed_chat`), and it is not the chat while the tick plays it.
+    static CHAT_BOX: RefCell<Option<ChatScreen>> = const { RefCell::new(None) };
 }
 
 /// What the Java's redirects in the player's `aiStep` read from `PathingBehavior`.
@@ -85,6 +89,9 @@ pub fn through(game: &mut Game<'_>) {
     }
     PLAYER_KEYS.with(|p| p.set(Some(player)));
     if !playing {
+        if game.screen == Screen::Chat {
+            CHAT_BOX.with(|b| *b.borrow_mut() = game.ui.chat_screen.take());
+        }
         BORROWED.with(|b| b.set(Some(game.screen)));
         game.screen = Screen::Playing;
     }
@@ -105,10 +112,26 @@ pub fn back(game: &mut Game<'_>) {
             game.keys.remove(key);
         }
     }
+    // The chat box goes back first: the screen comes back only with it, as a chat with no box is a screen no key can type in or close.
+    if let Some(chat) = CHAT_BOX.with(|b| b.borrow_mut().take()) {
+        if game.ui.chat_screen.is_none() {
+            game.ui.chat_screen = Some(chat);
+        }
+    }
     if let Some(screen) = BORROWED.with(Cell::take) {
-        if game.screen == Screen::Playing {
+        if game.screen == Screen::Playing && (screen != Screen::Chat || game.ui.chat_screen.is_some()) {
             game.screen = screen;
         }
+    }
+}
+
+/// Once a tick: the chat screen is only ever opened together with its box, so a chat screen without one is a screen that
+/// swallows every key (even F5) and cannot be closed. Whatever left the game like that, it is the player's again.
+pub fn mend(game: &mut Game<'_>) {
+    if game.screen == Screen::Chat && game.ui.chat_screen.is_none() {
+        game.screen = Screen::Playing;
+        game.capture(true);
+        eprintln!("[Baritone] the chat screen was open without its box: closed it");
     }
 }
 
