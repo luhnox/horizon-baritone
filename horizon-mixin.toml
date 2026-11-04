@@ -1,6 +1,6 @@
 [mod]
 id = "baritone"
-version = "1.1.42"
+version = "1.1.43"
 priority = 100
 
 # The commit this was written against: the Horizon the instance plays. It uses the native hook
@@ -596,8 +596,8 @@ bindings = [
 ]
 
 # Baritone's page in Options > Mods is a screen of its own, in the style of the Punchy settings screen: what it shows, where
-# everything stands and what a click does (plain Rust, tested in the lib crate), and the drawing of it. Four hooks in the game's
-# options wrappers hand it the drawing, the mouse, a drag and the wheel while the page open is Baritone's.
+# everything stands and what a click does (plain Rust, tested in the lib crate), and the drawing of it. Six hooks in the game's
+# options wrappers hand it the drawing, the mouse, a drag, the wheel, a key and typed text while the page open is Baritone's.
 [[module]]
 id = "mod_screen"
 file = "crates/horizon-client/src/game.rs"
@@ -652,6 +652,29 @@ helper = "hooks/page_wheel.rs"
 bindings = [
   { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
   { name = "amount", ty = "f32", value = "amount" },
+]
+
+[[injection]]
+id = "page_key"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::options::Game<'_>::options_key"
+helper = "hooks/page_key.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "key", ty = "winit::keyboard::KeyCode", value = "key" },
+  { name = "text", ty = "Option<&str>", value = "text" },
+]
+
+[[injection]]
+id = "page_text"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::control::Game<'_>::type_chars_into_screen"
+helper = "hooks/page_text.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "text", ty = "&str", value = "text" },
 ]
 
 [[injection]]

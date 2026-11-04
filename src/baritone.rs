@@ -32,7 +32,7 @@ use std::cell::{Cell as FlagCell, RefCell};
 pub const ID: &str = "baritone";
 /// `SettingsUtil.SETTINGS_DEFAULT_NAME`, in the mod's data folder.
 pub const SETTINGS_DEFAULT_NAME: &str = "settings.txt";
-pub const VERSION: &str = "1.1.42";
+pub const VERSION: &str = "1.1.43";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -477,7 +477,7 @@ impl Baritone {
                 super::baritone_notification::open_uri(url);
                 1
             }
-            Action::ResetCategory(category) => {
+            Action::Reset(category) => {
                 for name in screen::reset_names(category) {
                     if let Some(def) = settings::find(name) {
                         self.core.reset_setting(game, def);
@@ -485,7 +485,40 @@ impl Baritone {
                 }
                 1
             }
+            Action::AddBlock(word) => {
+                self.page_add_block(game, &word);
+                1
+            }
         }
+    }
+
+    /// A block typed on the page joins the blocks Baritone may place, when the game has such a block.
+    fn page_add_block(&mut self, game: &mut Game<'_>, word: &str) {
+        use super::baritone_screen::THROWAWAY;
+        let Some(full) = self.core.block_named(game, word) else {
+            self.core.say_red(game, &format!("There is no block called {word}."));
+            return;
+        };
+        let name = full.trim_start_matches("minecraft:").to_owned();
+        let mut list = self.core.settings.list(THROWAWAY);
+        if list.iter().any(|b| b.trim_start_matches("minecraft:") == name) {
+            self.core.say(game, &format!("{name} is already in the list."));
+            return;
+        }
+        list.push(name.clone());
+        let _ = self.core.set_setting(game, THROWAWAY, &list.join(","));
+        self.core.say(game, &format!("{name} added to the blocks Baritone may place."));
+    }
+
+    /// A key on Baritone's page: true when a text field took it (Escape then does not leave the page).
+    fn page_typed(&mut self, game: &mut Game<'_>, key: super::baritone_screen::Key, text: Option<&str>) -> bool {
+        use super::baritone_screen::Action;
+        // With no field up, every key but Escape is the page's and goes no further: Enter or Tab would press a widget under it.
+        let Some(action) = self.core.ui.key(key, text) else { return key != super::baritone_screen::Key::Escape };
+        if let Action::AddBlock(word) = action {
+            self.page_add_block(game, &word);
+        }
+        true
     }
 
     fn click_close(&mut self, game: &mut Game<'_>) {
@@ -782,6 +815,24 @@ pub fn page_draw(game: &mut Game<'_>, batch: &mut horizon_client::hud::HudBatch)
     with(game, |b, game| super::baritone_settings_ui::draw(b, game, batch));
 }
 
+/// Characters typed on the page: a field takes them, and with none up they are dropped.
+pub fn page_text(game: &mut Game<'_>, text: &str) {
+    with(game, |b, game| b.page_typed(game, super::baritone_screen::Key::Other, Some(text)));
+}
+
+/// A key on the page: true when the page took it. Escape in a field only leaves the field.
+pub fn page_key(game: &mut Game<'_>, key: winit::keyboard::KeyCode, text: Option<&str>) -> bool {
+    use winit::keyboard::KeyCode;
+    use super::baritone_screen::Key;
+    let key = match key {
+        KeyCode::Backspace => Key::Backspace,
+        KeyCode::Enter | KeyCode::NumpadEnter => Key::Enter,
+        KeyCode::Escape => Key::Escape,
+        _ => Key::Other,
+    };
+    with(game, |b, game| b.page_typed(game, key, text)).unwrap_or(false)
+}
+
 /// A press at the cursor (`drag`: a movement with the button held): see `Baritone::page_click`. A right click does nothing.
 pub fn page_press(game: &mut Game<'_>, drag: bool, right: bool) -> u8 {
     if right {
@@ -791,12 +842,12 @@ pub fn page_press(game: &mut Game<'_>, drag: bool, right: bool) -> u8 {
     with(game, |b, game| b.page_click(game, cursor, size, drag)).unwrap_or(0)
 }
 
-/// The wheel over the page scrolls the categories or the rows, whichever the cursor is over.
+/// The wheel over the page scrolls the rows.
 pub fn page_wheel(game: &mut Game<'_>, amount: f32) {
-    let (cursor, size) = (game.cursor, game.gui_size());
+    let size = game.gui_size();
     with(game, |b, _| {
         let l = super::baritone_screen::layout(size.0, size.1);
-        b.core.ui.wheel(amount, cursor, &l);
+        b.core.ui.wheel(amount, &l);
     });
 }
 

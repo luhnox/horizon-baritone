@@ -504,4 +504,4 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 
 | What | Where |
 |---|---|
-| The settings screen: Options > Mods > Baritone is a Punchy-style screen (title bar, categories, rows with a switch or a slider) instead of a list of buttons. Switches and sliders set the same settings `#set` does; Reset page puts a category back. | src/ui/settings_screen.rs (what it shows, layout, clicks; tested), src/game/settings_ui.rs (drawing), hooks/page_*.rs |
+| The settings screen: Options > Mods > Baritone is a screen built from Bedrock Edition's parts in Baritone's purple (header with back and search, tabs and rows with an item picture, switch, notched slider, dropdown, block-name field with Add, section labels, scrollbar, tooltip with the default) instead of a list of buttons. Switches and sliders set the same settings `#set` does; Reset page puts a category back. | src/ui/settings_screen.rs (what it shows, layout, clicks, keys; tested), src/game/settings_ui.rs (drawing), hooks/page_*.rs (draw, mouse, drag, wheel, key, text) |

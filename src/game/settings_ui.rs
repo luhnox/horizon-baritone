@@ -1,26 +1,42 @@
-// Baritone's settings screen as the game draws it: the page Options > Mods > Baritone, in the style of the Punchy settings screen,
-// drawn in place of the options screen's own page for it (the hooks are hooks/page_*.rs). What it shows, where everything
-// stands and what a click does is baritone_screen; this draws it with the game's own HUD pieces.
+// Baritone's settings screen as the game draws it: the page Options > Mods > Baritone, drawn in place of the options screen's own
+// page for it (the hooks are hooks/page_*.rs). What it shows, where everything stands and what a press does is baritone_screen;
+// this draws it with the parts of a Bedrock Edition screen: bevelled buttons, tabs and rows with an item picture, a switch, a
+// slider, a dropdown, text fields, section labels, a scrollbar, and a tooltip on hover. The colour is Baritone's own, the light
+// purple of its `[Baritone]` in chat.
 use super::baritone::Baritone;
-use super::baritone_screen::{self as screen, Control, Entry, Rect, CATEGORIES};
+use super::baritone_screen::{self as screen, Control, Field, Rect, View, CATEGORIES};
 use super::Game;
 use horizon_client::{
     hud::{rgba, HudAtlas, HudBatch},
+    items::ItemStack,
     text::Text,
     ui, widgets,
 };
+use std::sync::Arc;
 
 fn c(rgb: u32) -> u32 {
     rgba((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8, 255)
 }
 
-const YELLOW: u32 = 0xF0B323;
-const YELLOW_HOVER: u32 = 0xFFC83D;
-const YELLOW_DARK: u32 = 0xA87608;
-const YELLOW_LIGHT: u32 = 0xFFD769;
+// Baritone's purple.
+const ACCENT: u32 = 0xA83FD6;
+const ACCENT_HOVER: u32 = 0xBC5BE8;
+const ACCENT_LIGHT: u32 = 0xD58AF2;
+const ACCENT_DARK: u32 = 0x6B2491;
+// The grays of the screen.
+const EDGE: u32 = 0x1D1E1F;
+const PANEL: u32 = 0x313233;
+const HEADER: u32 = 0x3A3B3D;
+const WELL: u32 = 0x242526;
+const ROW_A: u32 = 0x2C2D2E;
+const ROW_B: u32 = 0x282829;
+const ROW_HOVER: u32 = 0x363738;
+const BUTTON: u32 = 0x6E6F72;
+const BUTTON_HOVER: u32 = 0x808184;
+const BUTTON_LIGHT: u32 = 0x9D9EA1;
+const BUTTON_DARK: u32 = 0x48494B;
 const WHITE: u32 = 0xFFFFFF;
-const GRAY: u32 = 0xA8A8A8;
-const BLACK: u32 = 0x101010;
+const MUTED: u32 = 0xA9AAAC;
 
 fn fill(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, color: u32) {
     batch.fill(atlas, r[0], r[1], r[2], r[3], color);
@@ -55,6 +71,11 @@ fn centered(batch: &mut HudBatch, atlas: &HudAtlas, s: &str, r: Rect, scale: f32
     put(batch, atlas, s, r[0] + (r[2] - w) / 2.0, r[1] + (r[3] - 8.0 * scale) / 2.0, scale, color, shadow, bold);
 }
 
+/// Text starting at `x`, centred up and down in `r`.
+fn left(batch: &mut HudBatch, atlas: &HudAtlas, s: &str, x: f32, r: Rect, scale: f32, color: u32) {
+    put(batch, atlas, s, x, r[1] + (r[3] - 8.0 * scale) / 2.0, scale, color, true, false);
+}
+
 /// `s` cut with "..." to fit in `room` pixels at `scale`.
 fn fitted(atlas: &HudAtlas, s: &str, room: f32, scale: f32) -> String {
     if width(atlas, s, scale, false) <= room {
@@ -71,62 +92,127 @@ fn fitted(atlas: &HudAtlas, s: &str, room: f32, scale: f32) -> String {
     format!("{}...", out.trim_end())
 }
 
-/// A yellow button with bold black text, raised as the Punchy ones are.
-fn yellow_button(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, label: &str, hover: bool, f: f32, scale: f32) {
-    let line = f.max(1.0).floor();
-    fill(batch, atlas, r, c(YELLOW_DARK));
-    fill(batch, atlas, [r[0] + line, r[1] + line, r[2] - 2.0 * line, r[3] - 2.0 * line], c(if hover { YELLOW_HOVER } else { YELLOW }));
-    fill(batch, atlas, [r[0] + line, r[1] + line, r[2] - 2.0 * line, line], c(YELLOW_LIGHT));
-    centered(batch, atlas, label, [r[0], r[1] - line * 0.5, r[2], r[3]], scale, c(BLACK), false, true);
+/// The end of `s` that fits in `room` pixels: what a text field shows while it is being typed in.
+fn tail(atlas: &HudAtlas, s: &str, room: f32, scale: f32) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut from = 0;
+    while from < chars.len() && width(atlas, &chars[from..].iter().collect::<String>(), scale, false) > room {
+        from += 1;
+    }
+    chars[from..].iter().collect()
 }
 
-/// The mark before a category's name: a colour square with a letter.
-fn icon(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, glyph: &str, color: u32, f: f32, scale: f32) {
-    let line = f.max(1.0).floor();
-    fill(batch, atlas, r, c(0x151515));
-    fill(batch, atlas, inset(r, line), c(color));
-    fill(batch, atlas, [r[0] + line, r[1] + line, r[2] - 2.0 * line, line], rgba(255, 255, 255, 70));
-    centered(batch, atlas, glyph, r, scale, c(WHITE), true, true);
+/// A bevelled box: the dark outline, a light edge above and to the left, a dark one below and to the right.
+fn bevel(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, body: u32, light: u32, dark: u32, outline: u32, line: f32) {
+    fill(batch, atlas, r, c(outline));
+    let i = inset(r, line);
+    fill(batch, atlas, i, c(dark));
+    fill(batch, atlas, [i[0], i[1], i[2] - line, i[3] - line], c(light));
+    fill(batch, atlas, inset(i, line), c(body));
 }
 
-/// The switch: the lit half yellow with an I, the knob on the other.
-fn switch(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, on: bool, f: f32, scale: f32) {
+/// A Bedrock button: gray, or Baritone's purple when it is the main one or the tab that is open; a hovered one is lighter and
+/// outlined in white.
+fn button(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, label: &str, hover: bool, main: bool, f: f32, scale: f32) {
     let line = f.max(1.0).floor();
-    fill(batch, atlas, r, c(0x141414));
+    let outline = if hover { WHITE } else { EDGE };
+    if main {
+        bevel(batch, atlas, r, if hover { ACCENT_HOVER } else { ACCENT }, ACCENT_LIGHT, ACCENT_DARK, outline, line);
+    } else {
+        bevel(batch, atlas, r, if hover { BUTTON_HOVER } else { BUTTON }, BUTTON_LIGHT, BUTTON_DARK, outline, line);
+    }
+    centered(batch, atlas, label, r, scale, c(WHITE), true, false);
+}
+
+/// A dark well: what a text field and the list sit in.
+fn well(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, edge: u32, f: f32) {
+    let line = f.max(1.0).floor();
+    fill(batch, atlas, r, c(edge));
+    fill(batch, atlas, inset(r, line), c(WELL));
+}
+
+/// The switch: Baritone's purple under an I when it is on, dark under an O when it is off, the knob on the other half.
+fn switch(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, on: bool, hover: bool, f: f32, scale: f32) {
+    let line = f.max(1.0).floor();
+    fill(batch, atlas, r, c(if hover { WHITE } else { EDGE }));
     let inner = inset(r, line);
     let half = (inner[2] / 2.0).floor();
     let (left, right) = ([inner[0], inner[1], half, inner[3]], [inner[0] + half, inner[1], inner[2] - half, inner[3]]);
     let (lit, knob) = if on { (left, right) } else { (right, left) };
     if on {
-        fill(batch, atlas, lit, c(YELLOW));
-        fill(batch, atlas, [lit[0], lit[1], lit[2], line], c(YELLOW_LIGHT));
-        centered(batch, atlas, "I", lit, scale, c(BLACK), false, true);
+        fill(batch, atlas, lit, c(ACCENT));
+        fill(batch, atlas, [lit[0], lit[1], lit[2], line], c(ACCENT_LIGHT));
+        centered(batch, atlas, "I", lit, scale, c(WHITE), true, true);
     } else {
-        fill(batch, atlas, lit, c(0x2B2B2B));
-        centered(batch, atlas, "O", lit, scale, c(0xB0B0B0), false, true);
+        fill(batch, atlas, lit, c(0x2B2C2D));
+        centered(batch, atlas, "O", lit, scale, c(0xB0B1B3), false, true);
     }
-    fill(batch, atlas, knob, c(0x8A8A8A));
-    fill(batch, atlas, [knob[0], knob[1], knob[2], knob[3] - line], c(0xD8D8D8));
-    fill(batch, atlas, [knob[0], knob[1], knob[2], line], c(0xF2F2F2));
+    bevel(batch, atlas, knob, BUTTON, BUTTON_LIGHT, BUTTON_DARK, EDGE, line);
 }
 
-/// The slider: a dark track with a yellow part up to the knob, a notch at each step, and the knob.
-fn slider(batch: &mut HudBatch, atlas: &HudAtlas, t: Rect, steps: usize, at: Option<f32>, f: f32) {
+/// The slider: a dark track with a purple part up to the knob, a notch at each step, and the gray knob.
+fn slider(batch: &mut HudBatch, atlas: &HudAtlas, t: Rect, steps: usize, at: Option<f32>, hover: bool, f: f32) {
     let line = f.max(1.0).floor();
-    fill(batch, atlas, t, c(0x141414));
-    let bar = [t[0] + line, t[1] + 2.0 * f, t[2] - 2.0 * line, t[3] - 4.0 * f];
-    fill(batch, atlas, bar, c(0x2B2B2B));
+    fill(batch, atlas, t, c(EDGE));
+    let bar = inset(t, line);
+    fill(batch, atlas, bar, c(0x3A3B3D));
     let pos = at.unwrap_or(0.0);
-    fill(batch, atlas, [bar[0], bar[1], bar[2] * pos, bar[3]], c(YELLOW));
+    fill(batch, atlas, [bar[0], bar[1], bar[2] * pos, bar[3]], c(ACCENT));
     for i in 1..steps.saturating_sub(1) {
         let x = bar[0] + bar[2] * i as f32 / (steps - 1) as f32;
-        fill(batch, atlas, [x.floor(), bar[1], line, bar[3]], c(0x141414));
+        fill(batch, atlas, [x.floor(), bar[1], line, bar[3]], c(EDGE));
     }
-    let (kw, kh) = (7.0 * f, 12.0 * f);
+    let (kw, kh) = (8.0 * f, 14.0 * f);
     let knob = [(bar[0] + bar[2] * pos - kw / 2.0).round().max(t[0]), t[1] + t[3] / 2.0 - kh / 2.0, kw, kh];
-    fill(batch, atlas, knob, c(0x141414));
-    fill(batch, atlas, inset(knob, line), c(0xC8C8C8));
-    fill(batch, atlas, [knob[0] + line, knob[1] + line, knob[2] - 2.0 * line, line], c(0xF2F2F2));
+    bevel(batch, atlas, knob, if hover { BUTTON_HOVER } else { BUTTON }, BUTTON_LIGHT, BUTTON_DARK, if hover { WHITE } else { EDGE }, line);
+}
+
+/// The little arrow on a dropdown.
+fn chevron(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, f: f32) {
+    let (cx, cy) = (r[0] + r[2] - 8.0 * f, r[1] + r[3] / 2.0 - 1.5 * f);
+    for i in 0..3 {
+        let w = (6.0 - 2.0 * i as f32) * f;
+        fill(batch, atlas, [cx - w / 2.0, cy + i as f32 * f, w, f], c(WHITE));
+    }
+}
+
+/// The magnifying glass of the search field.
+fn magnifier(batch: &mut HudBatch, atlas: &HudAtlas, x: f32, y: f32, f: f32) {
+    let line = f.max(1.0).floor();
+    let lens = [x, y, 6.0 * f, 6.0 * f];
+    fill(batch, atlas, lens, c(MUTED));
+    fill(batch, atlas, inset(lens, line), c(WELL));
+    fill(batch, atlas, [x + 5.0 * f, y + 5.0 * f, 2.0 * f, 2.0 * f], c(MUTED));
+    fill(batch, atlas, [x + 6.0 * f, y + 6.0 * f, 2.0 * f, 2.0 * f], c(MUTED));
+}
+
+/// A text field: a dark well with the text, or a hint in gray when it is empty, and a caret while it has the keys.
+fn text_field(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, text: &str, hint: &str, focused: bool, pad: f32, f: f32, scale: f32) {
+    well(batch, atlas, r, if focused { ACCENT } else { EDGE }, f);
+    let room = r[2] - pad - 6.0 * f;
+    if text.is_empty() && !focused {
+        left(batch, atlas, &fitted(atlas, hint, room, scale), r[0] + pad, r, scale, c(0x707173));
+        return;
+    }
+    let shown = tail(atlas, text, room, scale);
+    left(batch, atlas, &shown, r[0] + pad, r, scale, c(WHITE));
+    let blink = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() / 500 % 2);
+    if focused && blink == 0 {
+        let x = r[0] + pad + width(atlas, &shown, scale, false);
+        fill(batch, atlas, [x, r[1] + 3.0 * f, f.max(1.0).floor(), r[3] - 6.0 * f], c(WHITE));
+    }
+}
+
+/// An item's picture, `size` design pixels wide, with its top left at `(x, y)`; nothing for an item the game does not know.
+fn picture(game: &Game<'_>, batch: &mut HudBatch, item: &str, x: f32, y: f32, size: f32, f: f32) {
+    let id = format!("minecraft:{item}");
+    if game.res.items().get(&id).is_none() {
+        return;
+    }
+    let stack = ItemStack { item: Arc::from(id.as_str()), count: 1, damage: 0, extra: None };
+    let start = batch.vertices.len();
+    game.draw_item_model(batch, &stack, x, y);
+    batch.scale_since(start, x, y, size * f / 16.0, size * f / 16.0);
 }
 
 /// A thin scrollbar thumb at the right edge of `r`, when the content is taller than `r`.
@@ -134,9 +220,27 @@ fn scrollbar(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, content: f32, scro
     if content <= r[3] {
         return;
     }
-    let bar = (r[3] * r[3] / content).clamp(8.0 * f, r[3] - 4.0 * f);
+    let line = f.max(1.0).floor();
+    let track = [r[0] + r[2] - 4.0 * f, r[1], 3.0 * f, r[3]];
+    fill(batch, atlas, track, c(EDGE));
+    let bar = (r[3] * r[3] / content).clamp(10.0 * f, r[3] - 4.0 * f);
     let y = r[1] + (scroll / (content - r[3])) * (r[3] - bar);
-    fill(batch, atlas, [r[0] + r[2] - 4.0 * f, y, 3.0 * f, bar], c(0xBDBDBD));
+    bevel(batch, atlas, [track[0], y, track[2], bar], BUTTON, BUTTON_LIGHT, BUTTON_DARK, EDGE, line.min(1.0));
+}
+
+/// The words of `s` in lines of at most `max` letters.
+fn wrap(s: &str, max: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for word in s.split_whitespace() {
+        match lines.last_mut() {
+            Some(line) if line.chars().count() + 1 + word.chars().count() <= max => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_owned()),
+        }
+    }
+    lines
 }
 
 /// One frame of the screen, in place of the options screen's own page.
@@ -149,122 +253,163 @@ pub fn draw(b: &mut Baritone, game: &Game<'_>, batch: &mut HudBatch) {
     let line = f.max(1.0).floor();
     b.core.ui.clamp(&l);
     let (state, settings) = (&b.core.ui, &b.core.settings);
+    let view = state.rows();
+    let rects = screen::rows(&l, &view, state.scroll);
     let hover = |r: Rect| ui::hovered(cursor, r[0], r[1], r[2], r[3]);
+    let dropdown_open = state.open.is_some();
 
-    // The window with its shadow.
-    fill(batch, atlas, [l.window[0] + 3.0 * f, l.window[1] + 3.0 * f, l.window[2], l.window[3]], rgba(0, 0, 0, 90));
-    fill(batch, atlas, l.window, c(0x161616));
-    fill(batch, atlas, inset(l.window, line), c(0x313131));
-    fill(batch, atlas, [l.pane[0], l.pane[1], l.pane[2] - line, l.pane[3] - line], c(0x404040));
+    // The panel, with its shadow, and the header.
+    fill(batch, atlas, [0.0, 0.0, w, h], rgba(0, 0, 0, 90));
+    fill(batch, atlas, [l.panel[0] + 3.0 * f, l.panel[1] + 3.0 * f, l.panel[2], l.panel[3]], rgba(0, 0, 0, 100));
+    fill(batch, atlas, l.panel, c(EDGE));
+    fill(batch, atlas, inset(l.panel, line), c(PANEL));
+    fill(batch, atlas, [l.header[0] + line, l.header[1] + line, l.header[2] - 2.0 * line, l.header[3] - line], c(HEADER));
+    fill(batch, atlas, [l.header[0], l.header[1] + l.header[3] - line, l.header[2], line], c(EDGE));
 
-    // The title bar: light, with the name in bold black and the close button.
-    fill(batch, atlas, l.title_bar, c(0xE4E4E4));
-    fill(batch, atlas, [l.title_bar[0], l.title_bar[1] + l.title_bar[3] - 2.0 * f, l.title_bar[2], 2.0 * f], c(0xA0A0A0));
-    centered(batch, atlas, "BARITONE", [l.title_bar[0], l.title_bar[1], l.title_bar[2], l.title_bar[3] - 2.0 * f], t * 1.25, c(BLACK), false, true);
-    let close = hover(l.close);
-    if close {
-        fill(batch, atlas, [l.close[0], l.close[1] + line, l.close[2], l.close[3] - 3.0 * f], c(0xCFCFCF));
+    // The header: back, the name with its picture, the version, and the search field.
+    let back = hover(l.back) && !dropdown_open;
+    button(batch, atlas, l.back, "<", back, false, f, t * 1.1);
+    widgets::record("Back", l.back, true);
+    widgets::widget_cursor(back, true);
+    picture(game, batch, "diamond_pickaxe", l.back[0] + l.back[2] + 6.0 * f, l.header[1] + 5.0 * f, 16.0, f);
+    let name_x = l.back[0] + l.back[2] + 26.0 * f;
+    put(batch, atlas, "Baritone", name_x, l.header[1] + (l.header[3] - 8.0 * t * 1.25) / 2.0, t * 1.25, c(WHITE), true, true);
+    let name_w = width(atlas, "Baritone", t * 1.25, true);
+    put(batch, atlas, super::baritone::VERSION, name_x + name_w + 6.0 * f, l.header[1] + (l.header[3] - 8.0 * t * 0.8) / 2.0 + f, t * 0.8, c(MUTED), false, false);
+    text_field(batch, atlas, l.search, &state.search, "Search settings", state.focus == Some(Field::Search), 16.0 * f, f, t * 0.9);
+    magnifier(batch, atlas, l.search[0] + 5.0 * f, l.search[1] + 4.5 * f, f);
+    widgets::record("Search", l.search, true);
+    widgets::widget_cursor(hover(l.search), true);
+
+    // The tabs, each with the picture of an item.
+    for (i, r) in l.tabs.iter().enumerate() {
+        let selected = i == state.category && state.search.is_empty();
+        let over = hover(*r) && !dropdown_open;
+        button(batch, atlas, *r, "", over, selected, f, t);
+        let cat = &CATEGORIES[i];
+        picture(game, batch, cat.icon, r[0] + 4.0 * f, r[1] + (r[3] - 12.0 * f) / 2.0, 12.0, f);
+        left(batch, atlas, &fitted(atlas, cat.label, r[2] - 24.0 * f, t), r[0] + 20.0 * f, *r, t, c(WHITE));
+        widgets::record(cat.label, *r, true);
+        widgets::widget_cursor(over, true);
     }
-    centered(batch, atlas, "x", [l.close[0], l.close[1], l.close[2], l.close[3] - 2.0 * f], t * 1.4, c(BLACK), false, true);
-    widgets::record("Close", l.close, true);
-    widgets::widget_cursor(close, true);
 
-    // The brand box, Done and what has changed.
-    let bx = l.brand;
-    fill(batch, atlas, bx, c(0x1F1F1F));
-    fill(batch, atlas, [bx[0], bx[1] + bx[3] / 2.0, bx[2], bx[3] / 2.0], c(0x2A2A2A));
-    let name_w = width(atlas, "BARITONE", t * 2.0, true);
-    put(batch, atlas, "BARITONE", bx[0] + (bx[2] - name_w) / 2.0, bx[1] + 17.0 * f, t * 2.0, c(0xD9A441), true, true);
-    let tag_w = width(atlas, "for Horizon", t * 0.9, false);
-    put(batch, atlas, "for Horizon", bx[0] + (bx[2] - tag_w) / 2.0, bx[1] + 17.0 * f + 16.0 * t + 6.0 * f, t * 0.9, c(GRAY), false, false);
-    let done = hover(l.done);
-    yellow_button(batch, atlas, l.done, "DONE", done, f, t);
-    widgets::record("Done", l.done, true);
-    widgets::widget_cursor(done, true);
-    let n = screen::changed(settings);
-    let info = if n == 0 { "Nothing changed".to_owned() } else { format!("{n} changed from the defaults") };
-    put(batch, atlas, &info, l.info[0], l.info[1], t * 0.85, c(GRAY), false, false);
-
-    // The categories, scrolled and clipped under the Done button.
+    // The list in its well.
+    well(batch, atlas, l.frame, EDGE, f);
     let start = batch.vertices.len();
-    fill(batch, atlas, l.side_list, c(0x2A2A2A));
-    let side_hover = hover(l.side_list);
-    for (entry, r) in screen::side_entries(&l, state.side_scroll) {
-        if r[1] + r[3] < l.side_list[1] || r[1] > l.side_list[1] + l.side_list[3] {
+    let mut tip: Option<usize> = None;
+    for (i, (row, r)) in view.iter().zip(&rects).enumerate() {
+        let r = *r;
+        if r[1] + r[3] < l.list[1] || r[1] > l.list[1] + l.list[3] {
             continue;
         }
-        match entry {
-            Entry::Heading(text) => put(batch, atlas, text, r[0] + 7.0 * f, r[1] + 3.0 * f, t * 0.85, c(0x9A9A9A), false, false),
-            Entry::Category(i) => {
-                let over = side_hover && hover(r);
-                if i == state.category {
-                    fill(batch, atlas, r, c(0x4A4A4A));
-                    fill(batch, atlas, [r[0], r[1], 3.0 * f, r[3]], c(YELLOW));
-                } else if over {
-                    fill(batch, atlas, r, c(0x383838));
+        match row {
+            View::Count(n) => {
+                let label = if state.search.trim().is_empty() { format!("{n} settings") } else { format!("{n} found") };
+                put(batch, atlas, &label, r[0] + 8.0 * f, r[1] + (r[3] - 8.0 * t * 0.8) / 2.0, t * 0.8, c(MUTED), false, false);
+            }
+            View::Heading(text) => {
+                fill(batch, atlas, [r[0], r[1] + r[3] - line, r[2], line], c(EDGE));
+                put(batch, atlas, &text.to_uppercase(), r[0] + 8.0 * f, r[1] + (r[3] - 8.0 * t * 0.8) / 2.0 + f, t * 0.8, c(ACCENT_LIGHT), false, true);
+            }
+            View::Item(item) => {
+                let over = hover(r) && hover(l.list) && !dropdown_open;
+                if over {
+                    tip = Some(i);
                 }
-                let cat = &CATEGORIES[i];
-                let sq = 14.0 * f;
-                icon(batch, atlas, [r[0] + 10.0 * f, r[1] + (r[3] - sq) / 2.0, sq, sq], cat.glyph, cat.color, f, t * 0.9);
-                put(batch, atlas, cat.label, r[0] + 30.0 * f, r[1] + (r[3] - 8.0 * t) / 2.0, t, c(WHITE), true, false);
-                if r[1] >= l.side_list[1] && r[1] + r[3] <= l.side_list[1] + l.side_list[3] {
-                    widgets::record(cat.label, r, true);
+                fill(batch, atlas, r, c(if over { ROW_HOVER } else if i % 2 == 0 { ROW_A } else { ROW_B }));
+                fill(batch, atlas, [r[0], r[1] + r[3] - line, r[2], line], c(EDGE));
+                let top = if matches!(item.control, Control::Steps(..)) { r[1] + 6.0 * f } else { r[1] + (r[3] - 16.0 * f) / 2.0 };
+                picture(game, batch, item.icon, r[0] + 7.0 * f, top, 16.0, f);
+                let text_x = r[0] + 30.0 * f;
+                put(batch, atlas, item.label, text_x, top + 0.5 * f, t, c(WHITE), true, false);
+                let desc = screen::describe(item);
+                let room = match item.control {
+                    Control::Steps(..) => r[2] - 40.0 * f,
+                    Control::BlockInput => screen::block_field(&l, r)[0] - text_x - 6.0 * f,
+                    Control::Choice(..) => screen::dropdown(&l, r)[0] - text_x - 6.0 * f,
+                    _ => screen::switch(&l, r)[0] - text_x - 6.0 * f,
+                };
+                put(batch, atlas, &fitted(atlas, &desc, room, t * 0.8), text_x, top + 9.5 * t * 0.9 + f, t * 0.8, c(MUTED), false, false);
+                match item.control {
+                    Control::Toggle(_) | Control::Block(_) => {
+                        let sw = screen::switch(&l, r);
+                        switch(batch, atlas, sw, screen::is_on(item.control, settings) == Some(true), hover(sw) && !dropdown_open, f, t * 0.9);
+                    }
+                    Control::Steps(_, values) => {
+                        let shown = screen::value(item, settings);
+                        let vw = width(atlas, &shown, t, false);
+                        put(batch, atlas, &shown, r[0] + r[2] - 14.0 * f - vw, top + 0.5 * f, t, c(WHITE), true, false);
+                        let track = screen::track(&l, r);
+                        slider(batch, atlas, track, values.len(), screen::position(item.control, settings), hover(track) || state.dragging == Some(i), f);
+                    }
+                    Control::Choice(..) => {
+                        let d = screen::dropdown(&l, r);
+                        button(batch, atlas, d, "", hover(d) && !dropdown_open, state.open == Some(i), f, t * 0.9);
+                        left(batch, atlas, &fitted(atlas, &screen::value(item, settings), d[2] - 18.0 * f, t * 0.9), d[0] + 6.0 * f, d, t * 0.9, c(WHITE));
+                        chevron(batch, atlas, d, f);
+                    }
+                    Control::BlockInput => {
+                        let field = screen::block_field(&l, r);
+                        text_field(batch, atlas, field, &state.block, "Block name", state.focus == Some(Field::Block), 6.0 * f, f, t * 0.9);
+                        let add = screen::add_button(&l, r);
+                        button(batch, atlas, add, "Add", hover(add) && !dropdown_open, true, f, t * 0.9);
+                    }
+                    Control::Link(_) => {
+                        let open = screen::open_button(&l, r);
+                        button(batch, atlas, open, "Open", hover(open) && !dropdown_open, false, f, t * 0.9);
+                    }
+                    Control::ResetAll => {
+                        let reset = screen::open_button(&l, r);
+                        button(batch, atlas, reset, "Reset", hover(reset) && !dropdown_open, false, f, t * 0.9);
+                    }
+                }
+                if r[1] >= l.list[1] && r[1] + r[3] <= l.list[1] + l.list[3] {
+                    widgets::record(item.label, r, true);
                 }
                 widgets::widget_cursor(over, true);
             }
         }
     }
-    scrollbar(batch, atlas, l.side_list, screen::side_content_height(&l), state.side_scroll, f);
-    batch.clip_since(start, l.side_list[0], l.side_list[1], l.side_list[0] + l.side_list[2], l.side_list[1] + l.side_list[3]);
+    batch.clip_since(start, l.list[0], l.list[1], l.list[0] + l.list[2], l.list[1] + l.list[3]);
+    scrollbar(batch, atlas, l.frame, screen::content_height(&l, &view), state.scroll, f);
 
-    // The header of the page: its name and Reset page.
-    let cat = &CATEGORIES[state.category.min(CATEGORIES.len() - 1)];
-    fill(batch, atlas, l.head, c(0x383838));
-    fill(batch, atlas, [l.head[0], l.head[1] + l.head[3] - line, l.head[2], line], c(0x262626));
-    put(batch, atlas, &cat.label.to_uppercase(), l.head[0] + 8.0 * f, l.head[1] + (l.head[3] - 8.0 * t * 1.6) / 2.0, t * 1.6, c(WHITE), true, true);
-    if cat.items.iter().any(|i| !matches!(i.control, Control::Link(_))) {
-        let reset = hover(l.reset);
-        yellow_button(batch, atlas, l.reset, "Reset page", reset, f, t * 0.9);
-        widgets::record("Reset page", l.reset, true);
-        widgets::widget_cursor(reset, true);
+    // The footer.
+    let over = hover(l.reset) && !dropdown_open;
+    button(batch, atlas, l.reset, "Reset page", over, false, f, t);
+    widgets::record("Reset page", l.reset, true);
+    widgets::widget_cursor(over, true);
+    let over = hover(l.done) && !dropdown_open;
+    button(batch, atlas, l.done, "Done", over, true, f, t);
+    widgets::record("Done", l.done, true);
+    widgets::widget_cursor(over, true);
+
+    // An open dropdown hangs over everything under it.
+    if let Some(i) = state.open
+        && let (Some(View::Item(item)), Some(r)) = (view.get(i), rects.get(i))
+        && let Control::Choice(name, values) = item.control
+    {
+        let d = screen::dropdown(&l, *r);
+        for (value, o) in values.iter().zip(screen::dropdown_options(d, values.len())) {
+            let current = settings.get(name) == *value;
+            button(batch, atlas, o, "", hover(o), current, f, t * 0.9);
+            left(batch, atlas, &screen::pretty(value), o[0] + 6.0 * f, o, t * 0.9, c(WHITE));
+            widgets::record(&screen::pretty(value), o, true);
+        }
     }
 
-    // The rows of the page, scrolled and clipped to the list.
-    let start = batch.vertices.len();
-    let items = cat.items;
-    let rects = screen::rows(&l, items, state.scroll);
-    let list_hover = hover(l.list);
-    for (i, (item, r)) in items.iter().zip(&rects).enumerate() {
-        let r = *r;
-        if r[1] + r[3] < l.list[1] || r[1] > l.list[1] + l.list[3] {
-            continue;
+    // The tooltip of the row under the cursor: its name, what it does, and its default.
+    if let Some(i) = tip
+        && let Some(View::Item(item)) = view.get(i)
+        && state.open.is_none()
+        && !matches!(item.control, Control::BlockInput)
+    {
+        let mut lines = vec![Text::literal(item.label)];
+        for part in wrap(&screen::describe(item), 44) {
+            lines.push(Text::literal(part).with_color(0xAAAAAA));
         }
-        let over = list_hover && hover(r);
-        fill(batch, atlas, r, c(if over { 0x4B4B4B } else if i % 2 == 0 { 0x454545 } else { 0x404040 }));
-        fill(batch, atlas, [r[0], r[1] + r[3] - line, r[2], line], c(0x2E2E2E));
-        put(batch, atlas, item.label, r[0] + 8.0 * f, r[1] + 5.0 * f, t, c(WHITE), true, false);
-        let desc = fitted(atlas, &screen::describe(item), r[2] - 70.0 * f, t * 0.85);
-        put(batch, atlas, &desc, r[0] + 8.0 * f, r[1] + 5.0 * f + 9.5 * t, t * 0.85, c(GRAY), false, false);
-        match item.control {
-            Control::Toggle(_) | Control::Block(_) => {
-                switch(batch, atlas, screen::switch(&l, r), screen::is_on(item.control, settings) == Some(true), f, t * 0.9);
-            }
-            Control::Steps(_, values) => {
-                let shown = screen::value(item, settings);
-                let vw = width(atlas, &shown, t, false);
-                put(batch, atlas, &shown, r[0] + r[2] - 10.0 * f - vw, r[1] + 5.0 * f, t, c(WHITE), true, false);
-                slider(batch, atlas, screen::track(&l, r), values.len(), screen::position(item.control, settings), f);
-            }
-            Control::Link(_) => {
-                let button = screen::open_button(&l, r);
-                yellow_button(batch, atlas, button, "OPEN", hover(button), f, t * 0.9);
-            }
+        if let Some(default) = screen::default_of(item) {
+            lines.push(Text::literal(format!("Default: {default}")).with_color(0xD58AF2));
         }
-        if r[1] >= l.list[1] && r[1] + r[3] <= l.list[1] + l.list[3] {
-            widgets::record(item.label, r, true);
-        }
-        widgets::widget_cursor(over, true);
+        ui::tooltip(batch, atlas, &lines, cursor);
     }
-    scrollbar(batch, atlas, l.list, screen::content_height(&l, items), state.scroll, f);
-    batch.clip_since(start, l.list[0], l.list[1], l.list[0] + l.list[2] - line, l.list[1] + l.list[3]);
 }
