@@ -7,6 +7,7 @@ use super::baritone_calculation_context::CalculationContext;
 use super::baritone_movement_helper as mh;
 use super::baritone_state_factory::StateFactory;
 use super::Game;
+use horizon_client::chunk::{Chunk, HEIGHT, MIN_Y};
 use horizon_core::position::BlockPos;
 use horizon_world::fluid::FluidState;
 use horizon_world::fluid_flow::{flow_at, FluidFlowWorld};
@@ -112,18 +113,43 @@ struct LoadedChunk<'a> {
     factory: &'a StateFactory,
     cx: i32,
     cz: i32,
+    /// The chunk as it was when the server dropped it, once it is gone from the world.
+    snapshot: Option<Arc<Chunk>>,
 }
 
 impl LoadedChunk<'_> {
     fn state(&self, x: i32, y: i32, z: i32) -> Rc<BlockState> {
-        let _ = self.factory;
-        self.calc.bsi.get0(self.cx * 16 + x, y, self.cz * 16 + z)
+        match &self.snapshot {
+            Some(chunk) if (0..16).contains(&x) && (0..16).contains(&z) && (MIN_Y..MIN_Y + HEIGHT).contains(&y) => {
+                self.factory.state(BlockStateId(chunk.get(x, y, z)))
+            }
+            Some(_) => self.factory.state(self.game.res.facts().air),
+            None => self.calc.bsi.get0(self.cx * 16 + x, y, self.cz * 16 + z),
+        }
+    }
+
+    /// The chunk the blocks are read from: the one in the world, or the snapshot.
+    fn chunk(&self) -> Option<Arc<Chunk>> {
+        self.snapshot.clone().or_else(|| self.game.world.chunks.get(&(self.cx, self.cz)).cloned())
     }
 }
 
-/// The loaded world, as `FlowingFluid.getFlow` reads it.
+/// The world, as `FlowingFluid.getFlow` reads it: with the chunk being packed read from its snapshot when it has one.
 struct FlowView<'a> {
     game: &'a Game<'a>,
+    snapshot: Option<(i32, i32, Arc<Chunk>)>,
+}
+
+impl FlowView<'_> {
+    /// The block at a position: from the snapshot inside its chunk, else from the world.
+    fn at(&self, p: BlockPos) -> BlockStateId {
+        if let Some((cx, cz, chunk)) = &self.snapshot {
+            if p.x >> 4 == *cx && p.z >> 4 == *cz {
+                return if (MIN_Y..MIN_Y + HEIGHT).contains(&p.y) { BlockStateId(chunk.get(p.x & 15, p.y, p.z & 15)) } else { self.game.res.facts().air };
+            }
+        }
+        self.game.world.block(p.x, p.y, p.z)
+    }
 }
 
 impl FlowView<'_> {
@@ -139,12 +165,12 @@ impl FluidFlowWorld for FlowView<'_> {
     type Block = BlockStateId;
 
     fn fluid(&mut self, p: BlockPos) -> std::io::Result<FluidState> {
-        let state = self.game.pack.assets.registry.state(self.game.world.block(p.x, p.y, p.z));
+        let state = self.game.pack.assets.registry.state(self.at(p));
         FluidState::from_block(state.ok_or_else(|| std::io::Error::other("a block state the registry does not know"))?)
     }
 
     fn block(&mut self, p: BlockPos) -> std::io::Result<BlockStateId> {
-        Ok(self.game.world.block(p.x, p.y, p.z))
+        Ok(self.at(p))
     }
 
     fn blocks_fluid_flow(&self, s: BlockStateId) -> bool {
@@ -189,7 +215,7 @@ impl PackSource for LoadedChunk<'_> {
     }
 
     fn section_has_only_air(&self, section: i32) -> bool {
-        let Some(chunk) = self.game.world.chunks.get(&(self.cx, self.cz)) else { return true };
+        let Some(chunk) = self.chunk() else { return true };
         let air = self.game.res.facts().air.0 as u32;
         chunk.sections.get(section as usize).is_none_or(|s| !s.blocks.maybe_has(|v| v != air))
     }
@@ -212,7 +238,7 @@ impl PackSource for LoadedChunk<'_> {
             }
             if x == 0 || x == 15 || z == 0 || z == 15 {
                 // `getFlow`, by the game's own function: at the border of the chunk only water that moves is water to a path.
-                let flow = FlowView { game: self.game }.flow([self.cx * 16 + x, y, self.cz * 16 + z]);
+                let flow = FlowView { game: self.game, snapshot: self.snapshot.clone().map(|c| (self.cx, self.cz, c)) }.flow([self.cx * 16 + x, y, self.cz * 16 + z]);
                 return if flow.is_ok_and(|f| f.x != 0.0 || f.z != 0.0) { PathingBlockType::Water } else { PathingBlockType::Avoid };
             }
             return PathingBlockType::Water;
@@ -249,8 +275,8 @@ impl WorldProvider {
         self.current = Some(WorldData { key, dir, cache, seen: HashSet::new(), revision: 0, last_save: game.ticks, last_requeue: game.ticks });
     }
 
-    /// Queue the chunks that appeared since the last look, and re-queue the ones near the player now and then (the
-    /// Java packs a chunk again as it unloads, which a mod here cannot see).
+    /// Queue the chunks that appeared since the last look, and re-queue the ones near the player now and then (the Java
+    /// packs a chunk again as it unloads: `pack_unloaded` does, from what the unload hook kept).
     pub fn queue_chunks(&mut self, game: &Game<'_>) {
         let Some(data) = self.current.as_mut() else { return };
         let revision = game.world.chunks.membership_revision();
@@ -317,7 +343,25 @@ impl WorldProvider {
                 left.push((cx, cz));
                 continue;
             }
-            let source = LoadedChunk { game, calc, factory, cx, cz };
+            let source = LoadedChunk { game, calc, factory, cx, cz, snapshot: None };
+            done.push(pack(&source, now_ms));
+        }
+        (done, left)
+    }
+
+    /// `onChunkEvent` before an unload: the chunks the server dropped, packed from what they were, for up to `budget_ms`. The
+    /// ones that did not fit in the time are given back.
+    pub fn pack_unloaded(game: &Game<'_>, calc: &CalculationContext, factory: &StateFactory, unloaded: Vec<(i32, i32, Arc<Chunk>)>, budget_ms: u128) -> (Vec<CachedChunk>, Vec<(i32, i32, Arc<Chunk>)>) {
+        let start = Instant::now();
+        let now_ms = super::baritone_command::now_ms() as i64;
+        let mut done = Vec::new();
+        let mut left = Vec::new();
+        for (cx, cz, chunk) in unloaded {
+            if start.elapsed().as_millis() >= budget_ms {
+                left.push((cx, cz, chunk));
+                continue;
+            }
+            let source = LoadedChunk { game, calc, factory, cx, cz, snapshot: Some(chunk) };
             done.push(pack(&source, now_ms));
         }
         (done, left)

@@ -67,6 +67,10 @@ impl Core {
     /// loaded, pack as many as there is time for, and save now and then.
     pub fn cache_tick(&mut self, game: &mut Game<'_>) {
         let world_before = self.world_data.current.as_ref().map(|d| d.key.clone());
+        // `onChunkEvent` before an unload: the chunks the server dropped since the last tick, still in the world's last
+        // dimension unless this tick changed it.
+        let mut unloaded = std::mem::take(&mut self.unloading);
+        unloaded.extend(horizon_client::streaming::baritone_unload::take());
         self.world_data.follow(game, &self.settings);
         if world_before != self.world_data.current.as_ref().map(|d| d.key.clone()) {
             // LookBehavior.onWorldEvent.
@@ -84,6 +88,13 @@ impl Core {
                     data.cache.queue_for_packing(cx, cz);
                 }
             }
+        }
+        let same_world = world_before == self.world_data.current.as_ref().map(|d| d.key.clone());
+        if same_world && !unloaded.is_empty() {
+            let factory = self.states.clone();
+            let (done, left) = self.with_calc(game, |calc, ctx, _| ctx.with_game(|g| super::baritone_world_data::WorldProvider::pack_unloaded(g, calc, &factory, unloaded, 6)));
+            self.world_data.finish_batch(done, Vec::new());
+            self.unloading = left;
         }
         self.world_data.queue_chunks(game);
         let batch = self.world_data.take_batch(game, 4, self.settings.int("chunkPackerQueueMaxSize").max(0) as usize);

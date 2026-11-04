@@ -2,7 +2,8 @@
 // goal, the blocks the path breaks, places and walks into, the current and next path, the search in progress, the selections
 // and the elytra's view of its flight, all as lines. A line is drawn at 40 percent opacity unless a setting says otherwise,
 // with the width of its setting, over everything when its `...IgnoreDepth` setting is on and depth-tested when not.
-// Not drawn as the Java draws them: the beacon beam of a GoalXZ (a column of lines instead) and the GuiClick screen.
+// The beacon beam of a GoalXZ is the game's own beam geometry (`goal_beams`, called from the beacon hook), as the Java
+// asks the BeaconRenderer for it.
 use super::baritone::Baritone;
 use super::baritone_goals::{GoalRef, GoalRender};
 use super::baritone_gworld::dimension_extent_of;
@@ -181,7 +182,9 @@ fn draw_goal(c: &mut Canvas, sc: &Scene<'_>, goal: &GoalRef, color: u32) {
             dank_lit_goal_box(c, sc, color, min_x, max_x, min_z, max_z, min_y, max_y, Some(y1), Some(y2));
         }
         GoalRender::Xz(x, z) => {
-            // The Java draws a beacon beam here; a column of lines stands for it.
+            if sc.s.flag("renderGoalXZBeacon") {
+                return; // the beam is drawn with the beacons
+            }
             let (min_x, max_x) = (f64::from(x) + 0.002, f64::from(x) + 1.0 - 0.002);
             let (min_z, max_z) = (f64::from(z) + 0.002, f64::from(z) + 1.0 - 0.002);
             dank_lit_goal_box(c, sc, color, min_x, max_x, min_z, max_z, f64::from(sc.min_y), f64::from(sc.max_y), None, None);
@@ -200,6 +203,38 @@ fn draw_goal(c: &mut Canvas, sc: &Scene<'_>, goal: &GoalRef, color: u32) {
             dank_lit_goal_box(c, sc, color, p[0] - size, p[0] + size, p[2] - size, p[2] + size, min_y, min_y + 2.0, Some(y1), Some(y2));
         }
         GoalRender::Nothing => {}
+    }
+}
+
+/// Each GoalXZ a goal holds, with the color it is drawn in.
+fn xz_goals(goal: &GoalRef, color: u32, s: &Settings, out: &mut Vec<(i32, i32, u32)>) {
+    match goal.render_kind() {
+        GoalRender::Xz(x, z) => out.push((x, z, color)),
+        GoalRender::Composite(goals) => goals.iter().for_each(|g| xz_goals(g, color, s, out)),
+        GoalRender::Inverted(origin) => xz_goals(&origin, s.color("colorInvertedGoalBox"), s, out),
+        _ => {}
+    }
+}
+
+/// `PathRenderer.drawGoal`'s GoalXZ branch with `renderGoalXZBeacon`: `BeaconRenderer.renderBeaconBeam` from the world's
+/// lowest block, with the beacon's texture, for each GoalXZ of the goal. `camera` is where the frame is drawn from.
+pub fn goal_beams(b: &Baritone, game: &Game<'_>, camera: glam::DVec3, alpha: f64, out: &mut Vec<horizon_client::mesher::Vertex>) {
+    let s = &b.core.settings;
+    if !s.flag("renderGoal") || !s.flag("renderGoalXZBeacon") {
+        return;
+    }
+    let Some(goal) = b.core.pathing.goal() else { return };
+    let Some(sprite) = game.gui.atlas.sprites.get("entity/beacon/beacon_beam").copied() else { return };
+    let mut beams = Vec::new();
+    xz_goals(goal, s.color("colorGoalBox"), s, &mut beams);
+    // The Java gives the beam `getMaxY()` as its height, from `getMinY()`.
+    let (min_y, max_y) = dimension_extent_of(game);
+    let animated = s.flag("renderGoalAnimated");
+    let time = if animated { game.world.game_time.rem_euclid(40) as f32 + alpha as f32 } else { 0.0 };
+    for (x, z, color) in beams {
+        let origin = glam::Vec3::new((f64::from(x) - camera.x) as f32, (-camera.y) as f32, (f64::from(z) - camera.z) as f32);
+        let shape = horizon_client::block_entity_render::BeamShape { scale: 1.0, time, start: min_y, height: max_y, color: color & 0x00FF_FFFF, solid_radius: 0.2, glow_radius: 0.25 };
+        horizon_client::block_entity_render::beam(glam::Mat4::from_translation(origin), shape, sprite, out);
     }
 }
 

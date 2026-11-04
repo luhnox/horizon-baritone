@@ -32,7 +32,7 @@ use std::cell::{Cell as FlagCell, RefCell};
 pub const ID: &str = "baritone";
 /// `SettingsUtil.SETTINGS_DEFAULT_NAME`, in the mod's data folder.
 pub const SETTINGS_DEFAULT_NAME: &str = "settings.txt";
-pub const VERSION: &str = "1.1.31";
+pub const VERSION: &str = "1.1.32";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -41,6 +41,10 @@ pub struct Core {
     pub settings: Settings,
     /// What could not be read of the settings file, to say once there is a chat to say it in.
     setting_notes: Vec<String>,
+    /// The chunks the server dropped that did not fit in the tick's packing time.
+    pub unloading: Vec<(i32, i32, std::sync::Arc<horizon_client::chunk::Chunk>)>,
+    /// `BaritoneToast`: the one toast, shown again with new text while it is up.
+    toast: RefCell<Option<horizon_client::toasts::SystemToast>>,
     pub input: Input,
     pub pathing: PathingBehavior,
     /// LookBehavior's aim processor: the noise and the mouse steps of every aim.
@@ -81,6 +85,8 @@ impl Core {
         let mut core = Self {
             settings,
             setting_notes,
+            toast: RefCell::new(None),
+            unloading: Vec::new(),
             input: Input::default(),
             pathing: PathingBehavior::new(),
             aim: AimProcessor::new(super::baritone_command::now_ms()),
@@ -249,7 +255,23 @@ impl Core {
             .append(" ")
     }
 
+    /// `Helper.logToast`, `BaritoneToast.addOrUpdate`: a toast with the prefix for a title; one already up takes the new text.
+    fn log_toast(&self, body: &Text) {
+        let title = self.prefix_text().plain().trim().to_owned();
+        let message = body.plain();
+        let mut toast = self.toast.borrow_mut();
+        match toast.as_mut() {
+            Some(up) => up.reset(title, Some(message)),
+            None => *toast = Some(horizon_client::toasts::SystemToast::new(title, Some(message))),
+        }
+    }
+
     pub fn say_text(&self, game: &mut Game<'_>, body: Text) {
+        // logAsToast: the message is a toast and not a line of chat.
+        if self.settings.flag("logAsToast") {
+            self.log_toast(&body);
+            return;
+        }
         // useMessageTag: the messages are marked by a tag instead of the prefix (Horizon's chat has no tag to draw, so the
         // lines are plain).
         let line = if self.settings.flag("useMessageTag") { body } else { self.prefix_text().append(body) };
@@ -779,6 +801,41 @@ fn block_properties(game: &Game<'_>) -> super::baritone_tab::BlockProperties {
         }
     }
     found.into_iter().map(|(name, properties)| (name, properties.into_iter().collect())).collect()
+}
+
+/// The toast hook, once a frame from the game's mod HUD: `ToastManager.extractRenderState` for the Baritone toast, in a free
+/// 32 pixel slot, with the sound of a toast coming and going.
+pub fn draw_toast(game: &mut Game<'_>, batch: &mut horizon_client::hud::HudBatch) {
+    with(game, |b, game| {
+        let mut cell = b.core.toast.borrow_mut();
+        let Some(toast) = cell.as_mut() else { return };
+        if toast.slot.is_none() {
+            // The game's toasts take the lowest free slot; this one the highest, so that they rarely meet.
+            let used = game.toast_slots_used();
+            let Some(slot) = (0..Game::TOAST_SLOTS).rev().find(|s| used & (1 << s) == 0) else { return };
+            toast.slot = Some(slot);
+        }
+        let (sound, finished) = toast.update(f64::from(game.settings.notification_display_time));
+        if let Some(show) = sound {
+            let event = if show { "ui.toast.in" } else { "ui.toast.out" };
+            game.audio.play(&format!("minecraft:{event}"), None, 1.0, 1.0);
+        }
+        if finished {
+            *cell = None;
+            return;
+        }
+        if let Some(slot) = toast.slot {
+            toast.draw(&game.gui.atlas, batch, 32.0 * slot as f32);
+        }
+    });
+}
+
+/// The beacon hook: the beam of a GoalXZ, drawn with the beacons.
+pub fn goal_beams(game: &mut Game<'_>, camera: glam::DVec3, alpha: f64, out: &mut Vec<horizon_client::mesher::Vertex>) {
+    if !game.native_window() {
+        return;
+    }
+    with(game, |b, game| super::baritone_render::goal_beams(b, game, camera, alpha, out));
 }
 
 /// What TAB completes: the prefix, the waypoints, the block and mob names, and the function the chat

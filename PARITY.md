@@ -8,7 +8,7 @@ Every class of Baritone 1.21.4 (`src/api` and `src/main`, 332 Java files) is acc
 | missing | not written |
 | n/a | Java or Minecraft machinery with no meaning in Rust on Horizon (mixin accessors, the event bus, toasts) |
 
-Rows below: 297 (classes that go together share a row). ported 234, partial 8, missing 0, n/a 55.
+Rows below: 297 (classes that go together share a row). ported 242, partial 1, missing 0, n/a 54.
 
 All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from Settings.java, with the Java type `#set` prints), and every one is read by something, except five that have nothing to act on in Horizon: `logAsToast` (no way to push a toast of its own), `renderGoalXZBeacon`, `renderCachedChunks` and `cachedChunksOpacity` (no way to draw a beam or the cached world), and `pathingMapLoadFactor` (it tunes the Java hash map). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`. What is left in the rows below is mostly what needs a renderer of the game own: the toast, the beacon beam and the semitransparent cached chunks.
 
@@ -119,11 +119,11 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | BlockChangeEvent | ported | hooks/block_change.rs: every set_block, read by the elytra packer |
 | BlockInteractEvent | ported | hooks/block_interact.rs: USE only, which is all the Java listens to |
 | ChatEvent | ported | hooks/chat.rs |
-| ChunkEvent | partial | WorldCache::note_chunks: no event reaches a mod, so new chunks are noticed by the chunk set changing |
+| ChunkEvent | ported | WorldCache::note_chunks for the load, hooks/unload.rs and WorldProvider::pack_unloaded for the unload: a chunk is packed from what it was as the server drops it |
 | PacketEvent | n/a | Horizon has no packet hook |
 | PathEvent | n/a | PathingBehavior reads its own events; nothing outside listens |
 | PlayerUpdateEvent | n/a | native_tick |
-| RenderEvent | partial | hooks/lines.rs: lines only, Horizon gives a mod no renderer of its own |
+| RenderEvent | ported | hooks/lines.rs: once a frame with the camera and the view, which is what the event carries |
 | RotationMoveEvent | n/a |  |
 | SprintStateEvent | n/a | the sprint is Baritone input Sprint, set where the Java overrides the state |
 | TabCompleteEvent | ported | hooks/suggest_hook.rs |
@@ -176,11 +176,11 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 
 | Java | Status | Rust or note |
 |---|---|---|
-| AbstractSchematic | partial | a trait with its size, not an abstract class |
+| AbstractSchematic | ported | the size of each schematic; inSchematic is the trait default |
 | CompositeSchematic | ported | src/schematic/schematic.rs |
 | CompositeSchematicEntry | ported |  |
 | FillSchematic | ported |  |
-| ISchematic | partial | Schematic trait: desired() instead of desiredState() |
+| ISchematic | ported | the ISchematic trait of src/process/build.rs and wrappers.rs, with desiredState and inSchematic as the Java; the plain Schematic trait feeds it through SpecSchematic |
 | ISchematicSystem | ported | src/schematic/format.rs |
 | IStaticSchematic | ported | StaticSchematic |
 | MaskSchematic | ported | src/schematic/wrappers.rs |
@@ -230,7 +230,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | IInputOverrideHandler | ported | src/behavior/input.rs |
 | IPlayerContext, IPlayerController | ported | src/behavior/player_context.rs, game/player_context.rs |
 | MyChunkPos, Pair, TypeUtils, VecUtils | n/a | Rust types |
-| NotificationHelper, BaritoneToast | n/a | no desktop toast |
+| NotificationHelper, BaritoneToast | ported | src/utils/notification.rs (desktop) and the own SystemToast of the game (logAsToast), drawn from the mod HUD hook point |
 | PathCalculationResult | ported | Status in src/pathing/calc/a_star.rs |
 | RayTraceUtils | ported | GameCtx::ray_trace_towards |
 | Rotation, RotationUtils | ported | src/utils/rotation.rs, GameCtx::reachable |
@@ -264,7 +264,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | CacheFiles | ported | FileStore in src/game/world_data.rs |
 | CachedChunk | ported | src/cache/cached_world.rs |
 | CachedRegion | ported | src/cache/cached_world.rs, the .bcr format |
-| CachedWorld | partial | src/cache/cached_world.rs: no packer thread, a few chunks a tick |
+| CachedWorld | ported | src/cache/cached_world.rs; the packer thread is a slice of each tick (4 ms for loaded chunks, 6 ms for unloaded ones) because the game state is not Send, with the Java queue and its chunkPackerQueueMaxSize |
 | ChunkPacker | ported | src/game/world_data.rs: the flow of border water is the game own getFlow |
 | FasterWorldScanner | ported | src/game/scanner.rs: same chunk spiral and section order |
 | WaypointCollection | ported | src/cache/waypoints.rs |
@@ -437,7 +437,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 |---|---|---|
 | Selection | ported | src/selection/selection.rs |
 | SelectionManager | ported | src/selection/selection.rs |
-| SelectionRenderer | partial | src/game/render.rs |
+| SelectionRenderer | ported | src/game/render.rs (draw_selections): the boxes, corners and opacity of the Java |
 
 ## main/utils
 
@@ -450,9 +450,9 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | BlockStateInterface | ported | src/utils/block_state_interface.rs, answered by game/player_context.rs |
 | BlockStateInterfaceAccessWrapper | n/a |  |
 | GuiClick | ported | src/utils/gui_click.rs: the playing screen with the mouse let go stands in for the empty screen |
-| IRenderer | partial | src/game/render.rs |
+| IRenderer | ported | src/game/render.rs (Canvas): lines and boxes, depth-tested or over everything as the Ignore setting says |
 | InputOverrideHandler | ported | src/behavior/input.rs |
-| PathRenderer | partial | src/game/render.rs: path, goal, selections and elytra as lines (depth and on top); the GoalXZ beacon beam is a column of lines |
+| PathRenderer | partial | src/game/render.rs: path, goal, boxes and the elytra; a GoalXZ is the game's own beacon beam (goal_beams, hooks/goal_beam.rs); renderGoalIgnoreDepth does not reach the beam, which is drawn with the beacons |
 | PathingCommandContext | ported | Core::path_hooks and CostHooks |
 | PathingControlManager | ported | Baritone::control_tick and pathing_behavior.rs (pre_tick, post_tick) |
 | PlayerMovementInput | n/a | the game reads keys |
