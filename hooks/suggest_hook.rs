@@ -18,11 +18,10 @@ fn baritone_suggest(screen: &mut ChatScreen, m: &Measure) -> std::ops::ControlFl
     screen.input.suggestion = None;
     screen.suggestions = None;
     screen.usage.clear();
-    let mut builder = SuggestionsBuilder::new(partial, start);
-    builder.suggest_matching(names.iter().map(String::as_str));
-    let (range, list) = merge_suggestions(partial, builder.out);
+    // MixinCommandSuggestionHelper: the completions in the order they came, already filtered.
+    let list = names.into_iter().map(|text| Suggestion { range: (start, partial.len()), text, tooltip: None, int_value: None }).collect();
     screen.awaiting = None;
-    screen.pending = Some((range.0, list));
+    screen.pending = Some((start, list));
     screen.usage_width = 0;
     screen.usage_position = 0;
     if screen.allow_suggestions && screen.auto_suggestions {

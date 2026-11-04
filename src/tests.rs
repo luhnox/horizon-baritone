@@ -63,10 +63,6 @@ fn directions_and_yaw() {
     assert_eq!(facing_step(90.0), (-1, 0));
     assert_eq!(facing_step(180.0), (0, -1));
     assert_eq!(facing_step(-90.0), (1, 0));
-    assert_eq!(direction_named("North"), Some((0, -1)));
-    assert!((yaw_to(1.0, 0.0) + 90.0).abs() < 1e-3);
-    assert!((approach_yaw(170.0, -170.0, 40.0) - 190.0).abs() < 1e-3, "through 180, not back round");
-    assert!((approach_yaw(0.0, 90.0, 30.0) - 30.0).abs() < 1e-3);
 }
 
 // ---- search
@@ -169,37 +165,44 @@ mod extras {
     }
 
     #[test]
-    fn rotating_a_static_schematic_turns_it_and_its_facing() {
-        let stairs = BlockSpec::parse("oak_stairs[facing=north]");
-        let s = StaticSchematic {
-            size: [2, 1, 1],
-            blocks: vec![Some(BlockSpec::named("stone")), Some(stairs)],
-            name: "t".into(),
-        };
-        let r = rotate_quarter(&s);
-        assert_eq!(r.size, [1, 1, 2]);
-        assert_eq!(r.blocks[0].as_ref().unwrap().name, "minecraft:stone");
-        assert_eq!(r.blocks[1].as_ref().unwrap().props, vec![("facing".to_owned(), "east".to_owned())]);
+    fn the_feet_are_a_little_above_the_position_as_in_player_feet() {
+        use crate::baritone_utils::{block_pos_of, feet_of};
+        assert_eq!(feet_of([0.5, 64.0, -0.5]), [0, 64, -1]);
+        assert_eq!(feet_of([0.5, 64.875, 0.5]), [0, 65, 0], "on soul sand, the block above it");
+        assert_eq!(feet_of([0.5, 64.5, 0.5]), [0, 64, 0], "a slab: the world moves it up");
+        assert_eq!(block_pos_of([0.5, 64.875, 0.5]), [0, 64, 0]);
+    }
+
+    #[test]
+    fn a_coordinate_reads_as_the_java_reads_it() {
+        use crate::baritone_argument::{looks_relative, relative, relative_coordinate};
+        assert_eq!(relative("10", 5), Some(10));
+        assert_eq!(relative("~", 5), Some(5));
+        assert_eq!(relative("~-5", 5), Some(0));
+        assert_eq!(relative("10k", 0), Some(10_000));
+        assert_eq!(relative("-1.5K", 0), Some(-1500));
+        assert_eq!(relative("2m", 0), Some(2_000_000));
+        assert_eq!(relative("~1k", 500), Some(1500));
+        assert_eq!(relative("+.5", 0), Some(0), "floored");
+        assert_eq!(relative("-.5", 0), Some(-1), "floored, not cut");
+        assert_eq!(relative_coordinate("1.", 0.0), Some(1.0));
+        for bad in ["abc", "1k2", "k", "~k", ".", "1.2.3", "--1", "1e5", "inf", "NaN", "~~"] {
+            assert!(!looks_relative(bad), "{bad} is not a coordinate");
+        }
     }
 
     #[test]
     fn arguments() {
-        let mut a = Args::parse("goto 10 ~ ~-5 foo");
+        let mut a = Args::parse("goto foo");
         assert_eq!(a.string("command").unwrap(), "goto");
-        assert!(a.looks_like_coordinate());
-        assert_eq!(a.coord(0.0, "x").unwrap(), 10);
-        assert_eq!(a.coord(64.7, "y").unwrap(), 64);
-        assert_eq!(a.coord(100.2, "z").unwrap(), 95);
         assert!(a.int("n").is_err());
-        assert_eq!(a.try_one_of(&["foo", "bar"]).as_deref(), Some("foo"));
-        assert!(a.done().is_ok());
+        assert_eq!(a.string("foo").unwrap(), "foo");
         assert_eq!(a.string("more").unwrap_err().0, "Missing more.");
         let mut b = Args::parse("3 stone dirt");
         assert_eq!(b.try_int(), Some(3));
         assert_eq!(b.try_int(), None);
         assert_eq!(b.rest(), vec!["stone", "dirt"]);
         assert_eq!(b.one_of(&["Stone"], "block").unwrap(), "Stone");
-        assert!(b.done().is_err());
     }
 
     #[test]
@@ -234,18 +237,6 @@ mod extras {
         assert!(both.desired([2, 0, 0], "").is_none(), "the gap between them is left alone");
     }
 
-    #[test]
-    fn goal_shapes_for_drawing() {
-        use crate::baritone_goals::*;
-        let a = rc(GoalBlock([1, 64, 2]));
-        assert_eq!(a.shapes(), vec![Shape::Block([1, 64, 2])]);
-        assert_eq!(GoalXZ(3, 4).shapes(), vec![Shape::Column(3, 4)]);
-        assert_eq!(GoalXZ(3, 4).column(), Some((3, 4)));
-        assert_eq!(GoalYLevel(70).shapes(), vec![Shape::Level(70)]);
-        let inverted = GoalInverted(a.clone());
-        assert_eq!(inverted.shapes(), vec![Shape::Avoid([1, 64, 2])]);
-        assert_eq!(GoalComposite(vec![a, rc(GoalXZ(0, 0))]).shapes().len(), 2);
-    }
 
     #[test]
     fn pages_of_eight() {

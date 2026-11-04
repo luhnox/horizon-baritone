@@ -3,7 +3,7 @@
 // functions keep the Java's names and its order of tests; where the Java asks the block's class
 // (`block instanceof SlabBlock`) this asks the class flag the game filled in.
 use super::baritone_block_state::{BlockState, Class, FluidKind};
-use super::baritone_block_state_interface::BlockStateInterface;
+use super::baritone_block_state_interface::{cache_key, BlockStateInterface};
 use super::baritone_calculation_context::CalculationContext;
 use super::baritone_costs::COST_INF;
 
@@ -217,7 +217,7 @@ pub fn fully_passable_state(state: &BlockState) -> bool {
     }
 }
 
-pub fn is_replaceable(x: i32, y: i32, z: i32, state: &BlockState, bsi: &dyn BlockStateInterface) -> bool {
+pub fn is_replaceable(x: i32, _y: i32, z: i32, state: &BlockState, bsi: &dyn BlockStateInterface) -> bool {
     // For MovementTraverse and MovementAscend. Block double plant defaults to true when the block does not
     // match, all other overrides return true or false; the only case to deal with is snow.
     if state.is(Class::Air) {
@@ -393,6 +393,19 @@ pub fn get_mining_duration_ticks_at(ctx: &CalculationContext, x: i32, y: i32, z:
 }
 
 pub fn get_mining_duration_ticks(ctx: &CalculationContext, x: i32, y: i32, z: i32, state: &BlockState, include_falling: bool) -> f64 {
+    let Some(cache) = &ctx.mining else {
+        return get_mining_duration_ticks0(ctx, x, y, z, state, include_falling);
+    };
+    let key = cache_key(x, y - ctx.min_y, z);
+    if let Some(known) = cache.get(include_falling, key) {
+        return known;
+    }
+    let result = get_mining_duration_ticks0(ctx, x, y, z, state, include_falling);
+    cache.put(include_falling, key, result);
+    result
+}
+
+fn get_mining_duration_ticks0(ctx: &CalculationContext, x: i32, y: i32, z: i32, state: &BlockState, include_falling: bool) -> f64 {
     if !can_walk_through(ctx, x, y, z, state) {
         if state.has_fluid() {
             return COST_INF;

@@ -4,7 +4,7 @@
 use super::baritone::Core;
 use super::baritone_bom::BlockOptionalMetaLookup;
 use super::baritone_calculation_context::{CalculationContext, CostHooks};
-use super::baritone_goals::{rc, Goal, GoalBlock, GoalComposite, GoalGetToBlock, GoalRef, GoalRunAway, GoalTwoBlocks};
+use super::baritone_goals::{rc, GoalBlock, GoalComposite, GoalGetToBlock, GoalRef, GoalRunAway, GoalTwoBlocks};
 use super::baritone_movement_helper as mh;
 use super::baritone_movement_state::Input;
 use super::baritone_pathing::{PathingCommand, Process};
@@ -237,7 +237,7 @@ impl Process for GetToBlockProcess {
     }
 
     fn priority(&self) -> f64 {
-        0.0
+        super::baritone_pathing::DEFAULT_PRIORITY
     }
 
     fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, calc_failed: bool, safe_to_cancel: bool) -> PathingCommand {

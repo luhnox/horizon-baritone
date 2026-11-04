@@ -101,13 +101,12 @@ pub struct PathManager {
     max_player_near: usize,
     ticks_near_unchanged: i32,
     player_near: usize,
-    destination: Pos,
     append_destination: bool,
     notes: Vec<Note>,
 }
 
 impl PathManager {
-    pub fn new(destination: Pos, append_destination: bool) -> Self {
+    pub fn new(append_destination: bool) -> Self {
         Self {
             path: NetherPath::empty(),
             complete_path: true,
@@ -115,7 +114,6 @@ impl PathManager {
             max_player_near: 0,
             ticks_near_unchanged: 0,
             player_near: 0,
-            destination,
             append_destination,
             notes: Vec::new(),
         }
@@ -510,7 +508,7 @@ mod tests {
 
     #[test]
     fn the_player_is_matched_to_the_nearest_node_of_a_long_path() {
-        let mut m = PathManager::new([200, 100, 0], false);
+        let mut m = PathManager::new(false);
         let e = env();
         start_with(&mut m, &e, straight(30), true);
         m.update_player_near([123, 100, 2]);
@@ -522,7 +520,7 @@ mod tests {
 
     #[test]
     fn a_finished_search_sets_the_path_and_says_how_far_it_goes() {
-        let mut m = PathManager::new([200, 100, 0], false);
+        let mut m = PathManager::new(false);
         let e = env();
         start_with(&mut m, &e, straight(5), true);
         assert_eq!(m.path().len(), 5);
@@ -533,7 +531,7 @@ mod tests {
 
     #[test]
     fn a_failed_search_says_so_and_clears_the_flag() {
-        let mut m = PathManager::new([200, 100, 0], false);
+        let mut m = PathManager::new(false);
         let e = env();
         let job = m.path_to_destination(e.feet, &e);
         m.finish(job, Err(PathCalculationError("Path calculation failed".into())), &e);
@@ -544,13 +542,13 @@ mod tests {
     #[test]
     fn the_destination_is_appended_when_it_can_be_seen_and_reported_when_it_cannot() {
         let e = env();
-        let mut m = PathManager::new([200, 100, 0], true);
+        let mut m = PathManager::new(true);
         start_with(&mut m, &e, straight(5), true);
         assert_eq!(m.path().last(), Some([200, 100, 0]));
 
         let mut blocked = env();
         blocked.solid.push([100, 100, 0]);
-        let mut m = PathManager::new([200, 100, 0], true);
+        let mut m = PathManager::new(true);
         let job = m.path_to_destination(blocked.feet, &blocked);
         let out = m.finish(job, Ok(UnpackedSegment::new(straight(5), true)), &blocked);
         assert_eq!(out.bad_landing_spot, Some([200, 100, 0]));
@@ -560,7 +558,7 @@ mod tests {
 
     #[test]
     fn an_obstacle_between_two_nodes_starts_a_recalculation_that_keeps_the_rest_of_the_path() {
-        let mut m = PathManager::new([200, 100, 0], false);
+        let mut m = PathManager::new(false);
         let mut e = env();
         start_with(&mut m, &e, straight(20), true);
         e.chunks_up_to_x = 6; // chunks up to x 111 (node 11) are known
@@ -582,7 +580,7 @@ mod tests {
     #[test]
     fn no_progress_for_a_hundred_ticks_recalculates_unless_landing() {
         let mut e = env();
-        let mut m = PathManager::new([200, 100, 0], false);
+        let mut m = PathManager::new(false);
         start_with(&mut m, &e, straight(20), true);
         let mut last = None;
         for _ in 0..102 {
@@ -592,7 +590,7 @@ mod tests {
             }
         }
         assert!(last.is_some(), "stuck for 100 ticks");
-        let mut landing = PathManager::new([200, 100, 0], false);
+        let mut landing = PathManager::new(false);
         e.landing = true;
         start_with(&mut landing, &e, straight(20), true);
         assert!((0..150).all(|_| landing.tick(&e).is_none()));
@@ -600,7 +598,7 @@ mod tests {
 
     #[test]
     fn an_unfinished_path_asks_for_the_next_segment_once_its_end_is_in_a_loaded_chunk() {
-        let mut m = PathManager::new([2000, 100, 0], false);
+        let mut m = PathManager::new(false);
         let mut e = env();
         start_with(&mut m, &e, straight(5), false);
         e.chunks_up_to_x = 1; // the end of the path (x 40, chunk 2) is not loaded

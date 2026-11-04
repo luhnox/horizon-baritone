@@ -101,11 +101,10 @@ impl Process for BackfillProcess {
             return PathingCommand::RequestPause;
         }
         core.input.clear_all_keys();
-        let ticks = game.ticks;
         for to_place in self.to_fill_in(core, game) {
             let mut fake = MovementState::new();
             let result = core.with_calc(game, |calc, ctx, s| {
-                let env = Env { ctx, calc, settings: s, path: None, now_ticks: ticks };
+                let env = Env { ctx, calc, settings: s, path: None };
                 attempt_to_place_a_block(&env, &mut fake, to_place, false, false)
             });
             match result {

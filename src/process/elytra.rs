@@ -5,7 +5,7 @@
 use super::baritone::Core;
 use super::baritone_calculation_context::{CalculationContext, CostHooks};
 use super::baritone_costs::COST_INF;
-use super::baritone_elytra_behavior::{dimension_extent, firework_count, ElytraBehavior, FinderKind, ProcessFlags};
+use super::baritone_elytra_behavior::{dimension_extent, firework_count, ElytraBehavior, ProcessFlags};
 use super::baritone_elytra_context::NetherPathfinderContext;
 use super::baritone_elytra_pathfinder::Dimension;
 use super::baritone_elytra_path_manager::Note;

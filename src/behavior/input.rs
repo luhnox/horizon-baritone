@@ -6,15 +6,36 @@
 use super::baritone_movement_state::Input as In;
 use super::{Game, Screen};
 use std::cell::Cell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use winit::keyboard::KeyCode;
 
 thread_local! {
-    /// What Baritone holds down: forward, back, left, right, sprint, jump, sneak. The game reads the keys
-    /// only while it is playing, so with the chat or a menu open this is put into its key set for one tick.
+    /// What Baritone holds down: forward, back, left, right, sprint, jump, sneak.
     static HELD: Cell<[bool; 7]> = const { Cell::new([false; 7]) };
+    /// Baritone is clicking: BlockBreakHelper and BlockPlaceHelper do not care what screen is open.
+    static CLICKING: Cell<bool> = const { Cell::new(false) };
+    /// The path, as the motion of this tick has to know it.
+    static PATH: Cell<PathState> = const { Cell::new(PathState { has_path: false, sprint: None, allow_swimming: false }) };
+    /// The player's auto jump option was on and is off for this tick's motion.
+    static AUTO_JUMP: Cell<bool> = const { Cell::new(false) };
+    /// `InputOverrideHandler.inControl`: the player's motion reads Baritone's inputs and not the keyboard.
+    static IN_CONTROL: Cell<bool> = const { Cell::new(false) };
+    /// Which of the keys the player was holding, while Baritone's stand in for them.
+    static PLAYER_KEYS: Cell<Option<[bool; 7]>> = const { Cell::new(None) };
     /// The screen the tick turned into the playing one, to give back.
     static BORROWED: Cell<Option<Screen>> = const { Cell::new(None) };
+}
+
+/// What the Java's redirects in the player's `aiStep` read from `PathingBehavior`.
+#[derive(Clone, Copy, Default)]
+pub struct PathState {
+    /// `current != null`: the option `autoJump` is off for the motion (`PathingBehavior.onPlayerUpdate`).
+    pub has_path: bool,
+    /// `onPlayerSprintState`: `Some` while a path is walked, when the keyboard is not the player's, and then
+    /// whether that path sprints.
+    pub sprint: Option<bool>,
+    /// The setting `allowSwimming`.
+    pub allow_swimming: bool,
 }
 
 const KEYS: [(In, KeyCode); 7] = [
@@ -27,53 +48,78 @@ const KEYS: [(In, KeyCode); 7] = [
     (In::Sneak, KeyCode::ShiftLeft),
 ];
 
-fn held_keys() -> Vec<KeyCode> {
-    let bits = HELD.with(Cell::get);
-    KEYS.iter().zip(bits).filter(|(_, on)| *on).map(|((_, k), _)| *k).collect()
-}
-
-/// Just before the motion reads the keys: with the chat or a menu open and Baritone holding keys, the
-/// game plays for this one tick, as the Java Baritone walks with any GUI open. The keys go into the
-/// game's set only for it.
+/// Just before the motion reads the keys: `player.input = new PlayerMovementInput(this)`. While Baritone is in control the motion sees
+/// its inputs and not the keyboard, on any screen, as the Java Baritone walks with any GUI open. The keys are the player's again
+/// right after, so what the player holds is never lost.
 pub fn through(game: &mut Game<'_>) {
-    if game.screen == Screen::Playing || game.screen == Screen::Dead || BORROWED.with(Cell::get).is_some() {
+    let path = PATH.with(Cell::get);
+    if path.has_path && game.settings.auto_jump {
+        game.settings.auto_jump = false;
+        AUTO_JUMP.with(|a| a.set(true));
+    }
+    let playing = game.screen == Screen::Playing;
+    let wanted = IN_CONTROL.with(Cell::get) || (!playing && CLICKING.with(Cell::get));
+    if PLAYER_KEYS.with(Cell::get).is_some() || game.screen == Screen::Dead || !wanted {
         return;
     }
-    let keys = held_keys();
-    if keys.is_empty() {
-        return;
+    let held = HELD.with(Cell::get);
+    let mut player = [false; 7];
+    for (i, (input, key)) in KEYS.iter().enumerate() {
+        player[i] = game.keys.remove(key);
+        // MixinClientPlayerEntity.isKeyDown: the one key `PlayerMovementInput` does not cover.
+        let down = if *input == In::Sprint { path.sprint.unwrap_or(player[i] && playing) } else { held[i] };
+        if down {
+            game.keys.insert(*key);
+        }
     }
-    for key in keys {
-        game.keys.insert(key);
+    if path.sprint.is_some() {
+        if let Some(body) = game.player.as_mut() {
+            // MixinClientPlayerEntity.isAllowFlying and tryToStartFallFlying: a jump of a path neither toggles
+            // creative flight nor opens an elytra. The motion asks for a new press of jump for both.
+            body.was_jumping = true;
+            // MixinEntity.allowSwimStart: the swim state latches at the surface, not once the eye is under.
+            if path.allow_swimming && body.sprinting && body.fluids.was_touching_water {
+                body.swimming = true;
+            }
+        }
     }
-    BORROWED.with(|b| b.set(Some(game.screen)));
-    game.screen = Screen::Playing;
+    PLAYER_KEYS.with(|p| p.set(Some(player)));
+    if !playing {
+        BORROWED.with(|b| b.set(Some(game.screen)));
+        game.screen = Screen::Playing;
+    }
 }
 
-/// After the motion has read them: the screen is the screen again, without Baritone's keys.
+/// After the motion has read them: the keys are the player's again, and the screen is the screen.
 pub fn back(game: &mut Game<'_>) {
-    let Some(screen) = BORROWED.with(Cell::get) else {
+    if AUTO_JUMP.with(Cell::take) {
+        game.settings.auto_jump = true;
+    }
+    let Some(player) = PLAYER_KEYS.with(Cell::take) else {
         return;
     };
-    BORROWED.with(|b| b.set(None));
-    for key in held_keys() {
-        game.keys.remove(&key);
+    for (i, (_, key)) in KEYS.iter().enumerate() {
+        if player[i] {
+            game.keys.insert(*key);
+        } else {
+            game.keys.remove(key);
+        }
     }
-    if game.screen == Screen::Playing {
-        game.screen = screen;
+    if let Some(screen) = BORROWED.with(Cell::take) {
+        if game.screen == Screen::Playing {
+            game.screen = screen;
+        }
     }
 }
 
 #[derive(Default)]
 pub struct Input {
     forced: HashMap<In, bool>,
-    /// The keys put into the game's set, so they can be taken out again.
-    down: HashSet<KeyCode>,
+    /// Set from the behavior each tick.
+    pub path: PathState,
     /// Whether Baritone itself is holding the left mouse button. The game's own left button is the player's too, so it is
     /// only ever let go of when this says Baritone pressed it.
     attacking: bool,
-    /// A block being broken (not a forced input of the Java's): hold the attack until told to stop.
-    dig_attack: bool,
     /// `rightClickSpeed`: the ticks between two right clicks, set from the settings each tick.
     pub right_click_speed: i32,
     /// `blockBreakSpeed`: the ticks from one broken block to the next attack, set from the settings each tick.
@@ -86,10 +132,6 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn any_held(&self) -> bool {
-        self.forced.values().any(|v| *v)
-    }
-
     // ---- InputOverrideHandler
 
     pub fn is_input_forced_down(&self, input: In) -> bool {
@@ -100,11 +142,6 @@ impl Input {
         self.forced.insert(input, forced);
     }
 
-    /// Hold the attack button for a block being broken, or let go of it.
-    pub fn hold_attack(&mut self, on: bool) {
-        self.dig_attack = on;
-    }
-
     /// `clearAllKeys`: nothing forced any more (applied at the next `apply`).
     pub fn clear_all_keys(&mut self) {
         self.forced.clear();
@@ -112,20 +149,20 @@ impl Input {
 
     /// Put what is forced into the game: once a tick, after everything has set its inputs.
     pub fn apply(&mut self, game: &mut Game<'_>) {
-        let playing = game.screen == Screen::Playing;
+        if self.is_input_forced_down(In::ClickLeft) {
+            self.set_input_force_state(In::ClickRight, false);
+        }
         let mut bits = [false; 7];
-        for (i, (input, key)) in KEYS.iter().enumerate() {
-            let on = self.is_input_forced_down(*input);
-            bits[i] = on;
-            if on && playing {
-                game.keys.insert(*key);
-                self.down.insert(*key);
-            } else if self.down.remove(key) {
-                game.keys.remove(key);
-            }
+        for (i, (input, _)) in KEYS.iter().enumerate() {
+            bits[i] = self.is_input_forced_down(*input);
         }
         HELD.with(|h| h.set(bits));
-        let mut attack = self.is_input_forced_down(In::ClickLeft) || self.dig_attack;
+        CLICKING.with(|c| c.set(self.is_input_forced_down(In::ClickLeft) || self.is_input_forced_down(In::ClickRight)));
+        PATH.with(|p| p.set(self.path));
+        // inControl: the sprint alone does not count.
+        let moving = [In::MoveForward, In::MoveBack, In::MoveLeft, In::MoveRight, In::Sneak, In::Jump].iter().any(|i| self.is_input_forced_down(*i));
+        IN_CONTROL.with(|c| c.set(moving || self.path.sprint.is_some()));
+        let mut attack = self.is_input_forced_down(In::ClickLeft);
         if self.break_delay > 0 {
             self.break_delay -= 1;
             attack = false;
@@ -135,12 +172,15 @@ impl Input {
             let target = game.bar_look_target();
             if self.last_target.is_some() && target != self.last_target {
                 self.break_delay = (self.block_break_speed - 1).max(0);
+                // The game's own delay would otherwise slow every setting under the vanilla speed.
+                game.destroy_delay = 0;
             }
             self.last_target = target;
         } else {
             self.last_target = None;
         }
-        if attack != self.attacking {
+        // A screen that opens lets go of the game's button; Baritone's click does not go through the screen.
+        if attack != self.attacking || (attack && !game.left) {
             game.bar_attack(attack);
             self.attacking = attack;
         }
@@ -155,35 +195,8 @@ impl Input {
 
     /// Let go of everything held, at once.
     pub fn release(&mut self, game: &mut Game<'_>) {
-        self.dig_attack = false;
+        self.path = PathState::default();
         self.clear_all_keys();
         self.apply(game);
     }
-
-    // ---- the older helpers the processes use
-
-    /// Hold the keys marked on and let go of the others (W, Ctrl, Space, Shift only).
-    pub fn hold(&mut self, game: &mut Game<'_>, wanted: [(KeyCode, bool); 4]) {
-        for (key, on) in wanted {
-            if let Some((input, _)) = KEYS.iter().find(|(_, k)| *k == key) {
-                self.forced.insert(*input, on);
-            }
-        }
-        self.apply(game);
-    }
-
-    /// Stand still with these keys and no others.
-    pub fn only(&mut self, game: &mut Game<'_>, sneak: bool, forward: bool, jump: bool) {
-        self.hold(game, [(KeyCode::KeyW, forward), (KeyCode::ControlLeft, false), (KeyCode::Space, jump), (KeyCode::ShiftLeft, sneak)]);
-    }
-
-    /// Walk: forward, sprint, jump and sneak as asked.
-    pub fn walk(&mut self, game: &mut Game<'_>, forward: bool, sprint: bool, jump: bool, sneak: bool) {
-        self.hold(game, [(KeyCode::KeyW, forward), (KeyCode::ControlLeft, sprint), (KeyCode::Space, jump), (KeyCode::ShiftLeft, sneak)]);
-    }
-}
-
-/// Whether the player is pressing the movement keys themselves: they take the wheel back.
-pub fn player_took_over(game: &Game<'_>) -> bool {
-    [KeyCode::KeyW, KeyCode::KeyA, KeyCode::KeyS, KeyCode::KeyD].iter().any(|k| game.physical_keys.contains(k))
 }

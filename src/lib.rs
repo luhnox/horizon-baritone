@@ -7,8 +7,6 @@ pub mod baritone_utils;
 pub mod baritone_costs;
 #[path = "api/goals.rs"]
 pub mod baritone_goals;
-#[path = "pathing/helper.rs"]
-pub mod baritone_legacy_helper;
 #[path = "api/block_optional_meta.rs"]
 pub mod baritone_bom;
 #[path = "cache/world_scanner.rs"]

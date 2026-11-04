@@ -328,6 +328,19 @@ impl AStarPathFinder {
         None
     }
 
+    /// What `bestSoFar(true, ..)` logs: the coefficient of the path it picks, or how far the best one came.
+    pub fn best_so_far_report(&self) -> Result<f64, f64> {
+        let mut best_dist = 0.0_f64;
+        for (i, coefficient) in COEFFICIENTS.iter().enumerate() {
+            let dist = self.dist_from_start_sq(self.best_so_far[i]);
+            best_dist = best_dist.max(dist);
+            if dist > MIN_DIST_PATH * MIN_DIST_PATH {
+                return Ok(*coefficient);
+            }
+        }
+        Err(best_dist.sqrt())
+    }
+
     /// The path to the node considered last, for drawing.
     pub fn path_to_most_recent_node_considered(&self) -> Option<Path> {
         self.most_recent_considered.map(|n| Path::from_nodes(self.real_start, self.start, &self.nodes_chain(n), 0, self.goal.clone()))

@@ -2,32 +2,40 @@
 // Horizon's player, world and inventory into what the ported Baritone code asks for. Block states are
 // built from Horizon's facts once per state id and shared.
 use super::baritone_aim::{AimProcessor, AimSettings};
+use super::baritone_inventory as inv;
 use super::baritone_inventory::InventoryBehavior;
 use super::baritone_look::{LookBehavior, Mode};
 use super::baritone_cached_world::CachedWorld;
 use super::baritone_block_state::{BlockState, Class, FluidKind};
 use super::baritone_state_factory::StateFactory;
-use super::baritone_block_state_interface::BlockStateInterface;
+use super::baritone_block_state_interface::{BlockStateInterface, SearchBlocks};
 use super::baritone_calculation_context::{PlayerFacts, ToolSet};
 use super::baritone_gworld::loaded;
 use super::baritone_toolset::{str_vs_block, tool_slot_for, ToolSettings};
 use super::baritone_input::Input as InputHandler;
-use super::baritone_inventory as inv;
 use super::baritone_movement_state::Input;
 use super::baritone_player_context::PlayerContext;
 use super::baritone_rotation::{block_pos_center, calc_rotation_from_vec3d, Rotation};
 use super::baritone_settings::Settings;
-use super::baritone_utils::{feet_of, Pos};
+use super::baritone_utils::{block_pos_of, Pos};
 use super::Game;
-use horizon_client::blocks::Fluid;
-use horizon_core::geometry::{Direction, Vec3};
+use horizon_core::geometry::{Axis, Direction, Vec3};
 use horizon_core::position::BlockPos;
 use horizon_world::level::PlaceContext;
 use horizon_world::registry::BlockStateId;
-use horizon_core::geometry::Axis;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+
+/// `CalculationContext.frostWalkerLevel` and `waterSpeedMultiplier`, from everything the player has equipped:
+/// the last frost walker found, and the first enchantment raising `water_movement_efficiency`, which is depth
+/// strider (`0.33333334` a level in its data file).
+fn worn_enchantments(g: &Game<'_>) -> (i32, f64) {
+    let worn = || g.held().into_iter().chain(g.offhand.as_ref()).chain(g.armor.iter().flatten());
+    let frost_walker = worn().map(|s| s.enchantment_level("minecraft:frost_walker")).filter(|l| *l > 0).last().unwrap_or(0);
+    let depth_strider = worn().map(|s| s.enchantment_level("minecraft:depth_strider")).find(|l| *l > 0).unwrap_or(0);
+    (frost_walker as i32, f64::from(0.333_333_34_f32 * depth_strider as f32))
+}
 
 pub struct GameCtx<'a, 'g> {
     game: RefCell<&'a mut Game<'g>>,
@@ -44,11 +52,17 @@ pub struct GameCtx<'a, 'g> {
     tools: ToolSettings,
     /// `pathThroughCachedOnly`.
     cached_only: bool,
+    /// The cache a search has claimed.
+    search_blocks: RefCell<Option<Rc<SearchBlocks>>>,
+    /// `dimensionType().minY()` and `.height()`.
+    min_y: i32,
+    height: i32,
 }
 
 impl<'a, 'g> GameCtx<'a, 'g> {
     pub fn new(game: &'a mut Game<'g>, input: &'a mut InputHandler, settings: &'a Settings, throwaway: &'a [String], aim: &'a AimProcessor, look: &'a mut LookBehavior, inventory: &'a mut InventoryBehavior, factory: &'a StateFactory, cache: Option<&'a CachedWorld>) -> Self {
         let aim_settings = AimSettings::of(settings, f64::from(game.settings.sensitivity));
+        let (min_y, height) = super::baritone_elytra_behavior::dimension_extent(game.dim.id());
         Self {
             game: RefCell::new(game),
             input: RefCell::new(input),
@@ -63,6 +77,9 @@ impl<'a, 'g> GameCtx<'a, 'g> {
             tool_ticks: RefCell::new(HashMap::new()),
             tools: ToolSettings::of(settings),
             cached_only: settings.flag("pathThroughCachedOnly"),
+            search_blocks: RefCell::new(None),
+            min_y,
+            height,
         }
     }
 
@@ -99,24 +116,35 @@ impl<'a, 'g> GameCtx<'a, 'g> {
 
 impl BlockStateInterface for GameCtx<'_, '_> {
     fn get0(&self, x: i32, y: i32, z: i32) -> Rc<BlockState> {
-        let g = self.game.borrow();
-        if y < horizon_client::chunk::MIN_Y || y >= horizon_client::chunk::MIN_Y + horizon_client::chunk::HEIGHT {
-            return self.factory.state(g.res.facts().air);
+        if y < self.min_y || y >= self.min_y + self.height {
+            return self.factory.state(self.game.borrow().res.facts().air);
         }
-        if self.cached_only || !loaded(&g, [x, y, z]) {
-            // A chunk that is not loaded (or pathThroughCachedOnly) is what the cached world remembers of it, air where it remembers nothing.
-            let remembered = self.cache.and_then(|c| c.get_block(x, y, z)).and_then(|name| self.factory.default_state_of(&name));
-            return remembered.unwrap_or_else(|| self.factory.state(g.res.facts().air));
+        match &*self.search_blocks.borrow() {
+            Some(cache) => cache.get_or_read(x, y - self.min_y, z, || self.get_uncached(x, y, z)),
+            None => self.get_uncached(x, y, z),
         }
-        self.factory.state(g.world.block(x, y, z))
     }
 
+    fn claim_cache(&self, cache: Rc<SearchBlocks>) {
+        *self.search_blocks.borrow_mut() = Some(cache);
+    }
+
+    fn release_cache(&self) {
+        *self.search_blocks.borrow_mut() = None;
+    }
+
+    /// A chunk the search can read: in the world, or remembered by the cache.
     fn is_loaded(&self, x: i32, z: i32) -> bool {
+        loaded(&self.game.borrow(), [x, 0, z]) || self.cache.is_some_and(|c| c.is_cached(x, z))
+    }
+
+    /// `provider.hasChunk`: in the world, only.
+    fn world_contains_loaded_chunk(&self, x: i32, z: i32) -> bool {
         loaded(&self.game.borrow(), [x, 0, z])
     }
 
     fn min_y(&self) -> i32 {
-        horizon_client::chunk::MIN_Y
+        self.min_y
     }
 
     /// `BetterWorldBorder.entirelyContains`.
@@ -131,8 +159,9 @@ impl BlockStateInterface for GameCtx<'_, '_> {
         f64::from(x) > min_x && f64::from(x) + 1.0 < max_x && f64::from(z) > min_z && f64::from(z) + 1.0 < max_z
     }
 
+    /// The highest block there can be: `minY + height - 1`.
     fn max_y(&self) -> i32 {
-        horizon_client::chunk::MIN_Y + horizon_client::chunk::HEIGHT
+        self.min_y + self.height - 1
     }
 }
 
@@ -156,7 +185,7 @@ impl PlayerContext for GameCtx<'_, '_> {
     }
 
     fn player_feet(&self) -> Pos {
-        self.player(|g| g.player.as_ref().map_or([0, 0, 0], |p| feet_of([p.position.x, p.position.y, p.position.z])))
+        self.player(|g| super::baritone_gworld::player_feet(g).unwrap_or_default())
     }
 
     fn position(&self) -> [f64; 3] {
@@ -265,7 +294,7 @@ impl PlayerContext for GameCtx<'_, '_> {
     }
 
     fn movement_speed(&self) -> f64 {
-        0.13 // 0.1 base, times the sprint modifier
+        self.player(|g| g.player.as_ref().map_or(0.1, |p| f64::from(p.speed)))
     }
 
     fn is_looking_at(&self, pos: Pos) -> bool {
@@ -337,12 +366,13 @@ impl PlayerContext for GameCtx<'_, '_> {
     }
 
     fn calculation_facts(&self) -> PlayerFacts {
+        let (frost_walker, water_speed_multiplier) = self.player(worn_enchantments);
         PlayerFacts {
             has_throwaway: self.has_generic_throwaway(),
             has_water_bucket: self.settings.flag("allowWaterBucketFall") && self.water_bucket_hotbar_slot().is_some() && !self.is_nether(),
             can_sprint: self.food_level() > 6,
-            frost_walker: 0,
-            water_speed_multiplier: 0.0,
+            frost_walker,
+            water_speed_multiplier,
         }
     }
 
@@ -471,43 +501,15 @@ impl PlayerContext for GameCtx<'_, '_> {
                     "minecraft:enderman" => m.ai.target.is_some(),
                     _ => true,
                 })
-                .map(|m| feet_of([m.position.x, m.position.y, m.position.z]))
+                .map(|m| block_pos_of([m.position.x, m.position.y, m.position.z]))
                 .collect()
         })
     }
 
+    /// Avoidance.create asks the cache for `"mob_spawner"`. The cache keeps that block as `"spawner"`, so the Java
+    /// finds none and its spawner avoidance never happens. Neither does it here, with the same result.
     fn mob_spawners_near(&self) -> Vec<Pos> {
-        let feet = self.player_feet();
-        let g = self.game.borrow();
-        let ids: std::collections::HashSet<u32> = g.res.facts().states.iter().enumerate().filter(|(_, s)| &*s.name == "minecraft:spawner").map(|(i, _)| i as u32).collect();
-        if ids.is_empty() {
-            return Vec::new();
-        }
-        let mut found = Vec::new();
-        let (cx, cz) = (feet[0] >> 4, feet[2] >> 4);
-        for x in cx - 2..=cx + 2 {
-            for z in cz - 2..=cz + 2 {
-                let Some(chunk) = g.world.chunks.get(&(x, z)) else { continue };
-                for (s, section) in chunk.sections.iter().enumerate() {
-                    if !section.blocks.maybe_has(|v| ids.contains(&v)) {
-                        continue;
-                    }
-                    let base = horizon_client::chunk::MIN_Y + s as i32 * 16;
-                    for y in base..base + 16 {
-                        for lz in 0..16 {
-                            for lx in 0..16 {
-                                if ids.contains(&chunk.get(lx, y, lz)) {
-                                    found.push([x * 16 + lx, y, z * 16 + lz]);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        found.sort_by_key(|p| (p[0] - feet[0]).pow(2) + (p[1] - feet[1]).pow(2) + (p[2] - feet[2]).pow(2));
-        found.truncate(1);
-        found
+        Vec::new()
     }
 
     fn update_look_target(&self, rotation: Rotation, block_interact: bool) {
@@ -536,6 +538,17 @@ impl PlayerContext for GameCtx<'_, '_> {
 }
 
 impl GameCtx<'_, '_> {
+    /// `getUncached`: the world, or what the cache remembers of a chunk that is not there.
+    fn get_uncached(&self, x: i32, y: i32, z: i32) -> Rc<BlockState> {
+        let g = self.game.borrow();
+        if self.cached_only || !loaded(&g, [x, y, z]) {
+            // A chunk that is not loaded (or pathThroughCachedOnly) is what the cached world remembers of it, air where it remembers nothing.
+            let remembered = self.cache.and_then(|c| c.get_block(x, y, z)).and_then(|name| self.factory.default_state_of(&name));
+            return remembered.unwrap_or_else(|| self.factory.state(g.res.facts().air));
+        }
+        self.factory.state(g.world.block(x, y, z))
+    }
+
     /// Run `f` with the game.
     pub fn with_game<R>(&self, f: impl FnOnce(&Game<'_>) -> R) -> R {
         f(&self.game.borrow())
@@ -582,11 +595,8 @@ impl GameCtx<'_, '_> {
         Some((context, block))
     }
 
+    /// `BaritonePlayerContext.objectMouseOver`: along the rotation Baritone works with, at its reach.
     fn selected(&self) -> Option<(Pos, [i32; 3])> {
-        let eye = self.eye_with(false);
-        self.player(|g| {
-            let reach = g.bar_reach();
-            g.bar_ray(eye, g.yaw, g.pitch, reach)
-        })
+        self.ray_trace_towards(self.player_rotations(), self.block_reach_distance(), false)
     }
 }

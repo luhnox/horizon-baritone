@@ -2,9 +2,10 @@
 // starts: the world, the player's tools and items, and a snapshot of the settings, so that all the
 // moves of a search are costed the same way (a setting changed halfway would give an inconsistent path).
 use super::baritone_block_state::BlockState;
-use super::baritone_block_state_interface::BlockStateInterface;
+use super::baritone_block_state_interface::{cache_slot, BlockStateInterface, CACHE_SIZE, NO_KEY};
 use super::baritone_costs::{COST_INF, SWIM_ONE_BLOCK_COST, WALK_ONE_BLOCK_COST, WALK_ONE_IN_WATER_COST};
 use super::baritone_settings::Settings;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 /// baritone.utils.ToolSet: how fast the best tool at hand breaks a block (`getStrVsBlock`).
@@ -63,6 +64,8 @@ pub trait CostHooks {
 #[derive(Clone)]
 pub struct CalculationContext<'a> {
     pub hooks: Option<Rc<dyn CostHooks>>,
+    /// `miningKeys`: only while a search has claimed it.
+    pub mining: Option<Rc<SearchMining>>,
     pub bsi: &'a dyn BlockStateInterface,
     pub tool_set: &'a dyn ToolSet,
     pub has_water_bucket: bool,
@@ -103,7 +106,31 @@ pub struct CalculationContext<'a> {
     pub allow_walk_on_bottom_slab: bool,
     pub allow_place_in_fluids_source: bool,
     pub allow_place_in_fluids_flow: bool,
-    pub avoid_walking_into_unloaded: bool,
+}
+
+/// `miningKeys`, `miningKeysFalling` and their values: `getMiningDurationTicks` by position. The block under you gets its break
+/// cost worked out by four descends, a downward and then all your neighbours' descends, and every one of those reads five more
+/// blocks for avoidBreaking. The answer does not change during a search. Two of everything, because includeFalling is part of
+/// the question.
+pub struct SearchMining {
+    entries: RefCell<[Vec<(u64, f64)>; 2]>,
+}
+
+impl Default for SearchMining {
+    fn default() -> Self {
+        Self { entries: RefCell::new([vec![(NO_KEY, 0.0); CACHE_SIZE], vec![(NO_KEY, 0.0); CACHE_SIZE]]) }
+    }
+}
+
+impl SearchMining {
+    pub fn get(&self, include_falling: bool, key: u64) -> Option<f64> {
+        let (found, value) = self.entries.borrow()[usize::from(include_falling)][cache_slot(key)];
+        (found == key).then_some(value)
+    }
+
+    pub fn put(&self, include_falling: bool, key: u64, value: f64) {
+        self.entries.borrow_mut()[usize::from(include_falling)][cache_slot(key)] = (key, value);
+    }
 }
 
 impl<'a> CalculationContext<'a> {
@@ -117,6 +144,7 @@ impl<'a> CalculationContext<'a> {
         }
         Self {
             hooks: None,
+            mining: None,
             bsi,
             tool_set,
             has_water_bucket: facts.has_water_bucket,
@@ -155,7 +183,6 @@ impl<'a> CalculationContext<'a> {
             allow_walk_on_bottom_slab: settings.flag("allowWalkOnBottomSlab"),
             allow_place_in_fluids_source: settings.flag("allowPlaceInFluidsSource"),
             allow_place_in_fluids_flow: settings.flag("allowPlaceInFluidsFlow"),
-            avoid_walking_into_unloaded: false,
         }
     }
 
@@ -165,6 +192,12 @@ impl<'a> CalculationContext<'a> {
 
     pub fn is_loaded(&self, x: i32, z: i32) -> bool {
         self.bsi.is_loaded(x, z)
+    }
+
+    /// `claimSearchCaches`, for this context.
+    pub fn with_mining_cache(mut self, cache: Rc<SearchMining>) -> Self {
+        self.mining = Some(cache);
+        self
     }
 
     /// The same context with a process's overrides.

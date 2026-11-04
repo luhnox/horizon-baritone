@@ -9,7 +9,7 @@ This port is **not complete**. This file lists the classes of Baritone 1.21.4 (`
 | missing | not written |
 | n/a | Java or Minecraft machinery with no meaning in Rust on Horizon (mixin accessors, the event bus, toasts) |
 
-Rows below: 297 (classes that go together share a row). ported 180, partial 62, missing 0, n/a 55.
+Rows below: 297 (classes that go together share a row). ported 207, partial 35, missing 0, n/a 55.
 
 All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from Settings.java, with the Java type `#set` prints), and every one is read by something, except five that have nothing to act on in Horizon: `logAsToast` (no way to push a toast of its own), `renderGoalXZBeacon`, `renderCachedChunks` and `cachedChunksOpacity` (no way to draw a beam or the cached world), and `pathingMapLoadFactor` (it tunes the Java hash map). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`. What is left in the rows below is mostly what needs a renderer of the game own: the toast, the beacon beam and the semitransparent cached chunks.
 
@@ -79,18 +79,18 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 
 | Java | Status | Rust or note |
 |---|---|---|
-| BlockById | partial | Core::block_named |
-| EntityClassById | partial | follow: mob ids |
+| BlockById | ported | src/command/tab.rs, Core::block_named |
+| EntityClassById | ported | src/command/tab.rs, follow: mob ids |
 | ForAxis | ported | src/command/build.rs |
-| ForBlockOptionalMeta | partial | names and [properties] only |
+| ForBlockOptionalMeta | ported | src/command/tab.rs: the id, property names and values |
 | ForDirection | ported | src/api/utils.rs |
 | ForWaypoints | ported | src/cache/waypoints.rs (lookup) |
 | IDatatype, IDatatypeContext, IDatatypeFor, IDatatypePost, IDatatypePostFunction | n/a | typed arguments are methods of Args |
-| ItemById | partial | pickup validates an item id |
-| NearbyPlayer | partial | follow player names |
+| ItemById | ported | src/command/tab.rs, pickup validates an item id |
+| NearbyPlayer | ported | src/command/tab.rs, follow player names |
 | RelativeBlockPos | ported | src/command/manager.rs |
-| RelativeCoordinate | ported | src/command/manager.rs |
-| RelativeFile | partial | src/command/build.rs |
+| RelativeCoordinate | ported | src/command/argument.rs: k and m scales, decimals, floored as the Java floors |
+| RelativeFile | ported | src/command/tab.rs (relative_file), build.rs |
 | RelativeGoal, RelativeGoalBlock, RelativeGoalXZ, RelativeGoalYLevel | ported | src/command/manager.rs (relative_goal) |
 
 ## api/command/exception
@@ -104,7 +104,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | Java | Status | Rust or note |
 |---|---|---|
 | Paginator | ported | src/command/argument.rs, manager.rs (paginate) |
-| TabCompleteHelper | partial | src/command/tab.rs |
+| TabCompleteHelper | ported | src/command/tab.rs |
 
 ## api/command/manager and registry
 
@@ -118,7 +118,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | Java | Status | Rust or note |
 |---|---|---|
 | BlockChangeEvent | ported | hooks/block_change.rs: every set_block, read by the elytra packer |
-| BlockInteractEvent | partial | hooks/block_interact.rs: USE only, which is all the Java listens to |
+| BlockInteractEvent | ported | hooks/block_interact.rs: USE only, which is all the Java listens to |
 | ChatEvent | ported | hooks/chat.rs |
 | ChunkEvent | partial | WorldCache::note_chunks |
 | PacketEvent | n/a | Horizon has no packet hook |
@@ -162,13 +162,13 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | Java | Status | Rust or note |
 |---|---|---|
 | IBaritoneProcess | ported | Process trait, src/behavior/pathing.rs |
-| IBuilderProcess | partial | src/process/build.rs |
+| IBuilderProcess | ported | src/process/build.rs |
 | ICustomGoalProcess | ported | src/process/goal.rs |
 | IElytraProcess | ported | src/process/elytra.rs |
-| IExploreProcess | partial | src/process/explore.rs |
-| IFarmProcess | partial | src/process/farm.rs |
-| IFollowProcess | partial | src/process/follow.rs |
-| IGetToBlockProcess | partial | src/process/getto.rs |
+| IExploreProcess | ported | src/process/explore.rs |
+| IFarmProcess | ported | src/process/farm.rs |
+| IFollowProcess | ported | src/process/follow.rs |
+| IGetToBlockProcess | ported | src/process/getto.rs |
 | IMineProcess | ported | src/process/mine.rs |
 | PathingCommand | ported | src/behavior/pathing.rs |
 | PathingCommandType | ported | the variants of PathingCommand |
@@ -223,8 +223,8 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | Java | Status | Rust or note |
 |---|---|---|
 | BetterBlockPos | partial | Pos = [i32; 3] |
-| BlockOptionalMeta | partial | name and properties as text |
-| BlockOptionalMetaLookup | partial | a set of names |
+| BlockOptionalMeta | ported | src/api/block_optional_meta.rs: drops from the loot tables, src/game/scanner.rs |
+| BlockOptionalMetaLookup | ported | src/api/block_optional_meta.rs |
 | BlockUtils | partial |  |
 | BooleanBinaryOperator, BooleanBinaryOperators | n/a | only BinaryOperatorMask uses them |
 | Helper | n/a | Core::say* |
@@ -235,7 +235,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | PathCalculationResult | partial | Status |
 | RayTraceUtils | ported | GameCtx::ray_trace_towards |
 | Rotation, RotationUtils | ported | src/utils/rotation.rs, GameCtx::reachable |
-| SettingsUtil | partial | Settings::load |
+| SettingsUtil | ported | src/api/settings.rs (to_file_text, apply_file_text): settings.txt in the same format |
 | IItemStack, ILootTable | n/a | no loot tables |
 | Input | ported | src/behavior/movement_state.rs |
 | IGoalRenderPos | partial | Goal::render_pos |
@@ -292,7 +292,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 |---|---|---|
 | AxisCommand | ported | nav.rs |
 | BlacklistCommand | ported | work.rs |
-| BuildCommand | partial | build.rs: own file reader, no Schematica |
+| BuildCommand | ported | build.rs: Schematica is not a thing on Horizon |
 | ClickCommand | ported | nav.rs |
 | ComeCommand | ported | nav.rs: the camera entity is the player here |
 | CommandAlias | ported | manager.rs |
@@ -300,9 +300,9 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | ETACommand | ported | nav.rs |
 | ElytraCommand | ported | work.rs |
 | ExecutionControlCommands | ported | nav.rs |
-| ExploreCommand | partial | work.rs |
-| ExploreFilterCommand | partial | work.rs |
-| FarmCommand | partial | work.rs |
+| ExploreCommand | ported | work.rs |
+| ExploreFilterCommand | ported | work.rs |
+| FarmCommand | ported | work.rs |
 | FindCommand | ported | work.rs |
 | FollowCommand | ported | work.rs |
 | ForceCancelCommand | ported | nav.rs |
@@ -311,7 +311,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | GotoCommand | ported | nav.rs |
 | HelpCommand | ported | meta.rs, manager.rs |
 | InvertCommand | ported | nav.rs |
-| LitematicaCommand | partial | build.rs: says Litematica is not present |
+| LitematicaCommand | ported | build.rs: says Litematica is not present, as the Java does without the mod |
 | MineCommand | ported | work.rs |
 | PathCommand | ported | nav.rs |
 | PickupCommand | ported | work.rs |
@@ -391,11 +391,11 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | Java | Status | Rust or note |
 |---|---|---|
 | BackfillProcess | ported | src/process/backfill.rs |
-| BuilderProcess | partial | src/process/build.rs and builder_logic.rs: written from the Java; a schematic is of this crate text kind until the builder turns it into block states; the placeAt hint matches the block, not the item exact placement state |
+| BuilderProcess | ported | src/process/build.rs and builder_logic.rs; would_place simulates the placement as hasAnyItemThatWouldPlace does |
 | CustomGoalProcess | ported | src/process/goal.rs |
 | ElytraProcess | ported | src/process/elytra.rs: written from the Java |
 | ExploreProcess | ported | src/process/explore.rs over the cached world |
-| FarmProcess | ported | src/process/farm.rs: bone meal targets are crops and cocoa |
+| FarmProcess | ported | src/process/farm.rs |
 | FollowProcess | ported | src/process/follow.rs |
 | GetToBlockProcess | ported | src/process/getto.rs |
 | InventoryPauserProcess | ported | src/process/backfill.rs |
@@ -407,7 +407,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 |---|---|---|
 | BlockStateOctreeInterface | ported | src/process/elytra/context.rs |
 | BuildLimitPathFinder | ported | src/process/elytra/build_limit.rs |
-| ElytraBehavior | ported | src/process/elytra/behavior.rs, flight.rs (solver and physics), path_manager.rs; the solver runs on the game thread, no elytraAutoSwap |
+| ElytraBehavior | ported | src/process/elytra/behavior.rs, flight.rs (solver and physics), path_manager.rs; the solver runs on the game thread; hooks/set_back.rs is onReceivePacket |
 | IElytraPathFinder | ported | NetherSearch in build_limit.rs |
 | NetherPath | ported | src/process/elytra/segment.rs |
 | NetherPathfinderContext | ported | src/process/elytra/context.rs: no lock, chunks are immutable snapshots |
@@ -446,8 +446,8 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 |---|---|---|
 | BaritoneMath | n/a | f64 methods |
 | BaritoneProcessHelper | n/a |  |
-| BlockBreakHelper | partial | behavior/pathing.rs (dig_step), behavior/input.rs (blockBreakSpeed delay) |
-| BlockPlaceHelper | partial | behavior/pathing.rs (click_block) |
+| BlockBreakHelper | ported | src/behavior/input.rs: holds the game button, works behind any screen; blockBreakSpeed resets the destroy delay |
+| BlockPlaceHelper | ported | src/behavior/input.rs: rightClickSpeed |
 | BlockStateInterface | ported | src/utils/block_state_interface.rs, answered by game/player_context.rs |
 | BlockStateInterfaceAccessWrapper | n/a |  |
 | GuiClick | ported | src/utils/gui_click.rs: the playing screen with the mouse let go stands in for the empty screen |
@@ -477,12 +477,12 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 
 | Java | Status | Rust or note |
 |---|---|---|
-| Avoidance | ported | src/pathing/avoidance.rs: spiders, angry piglins and endermen are not told apart |
+| Avoidance | ported | src/pathing/avoidance.rs, src/game/player_context.rs |
 | BetterWorldBorder | ported | GameCtx::entirely_contains and can_place_at |
 | Favoring | ported | create_pathfinder in src/behavior/pathing_behavior.rs: a map of factors in the search |
 | MutableMoveResult | ported | src/pathing/movement/calculation_context.rs |
 | PathBase | ported | src/pathing/calc/path.rs: cutoff_at_loaded_chunks, static_cutoff |
-| PathingBlockType | partial | Cell |
+| PathingBlockType | ported | src/cache/cached_world.rs |
 | BaritonePlayerContext, BaritonePlayerController | partial |  |
 
 ## main/utils/schematic
@@ -494,9 +494,9 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | SelectionSchematic | ported | MaskSchematic::selection |
 | StaticSchematic | partial |  |
 | DefaultSchematicFormats | partial | src/schematic/format.rs |
-| LitematicaSchematic | partial | .litematic read |
+| LitematicaSchematic | ported | src/schematic/format.rs (litematic): regions, overlaps as CompositeSchematic |
 | MCEditSchematic | ported | src/schematic/legacy.rs: the id table is the game own ItemIdFix |
-| SpongeSchematic | partial | .schem read |
+| SpongeSchematic | ported | src/schematic/format.rs (sponge): also reads version 3 |
 | LitematicaHelper | n/a | needs the Litematica mod |
 | SchematicAdapter, SchematicaHelper | n/a | need the Schematica mod |
 | VarInt | partial | inside format.rs |

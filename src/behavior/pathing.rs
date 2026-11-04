@@ -1,21 +1,17 @@
 // The game side of baritone.behavior.PathingBehavior and baritone.utils.PathingControlManager: the
 // processes ask for a `PathingCommand` every tick, and `Core::path_tick` hands it to the pathing behavior
-// (pathing_behavior.rs) with the game wrapped as a PlayerContext (game/player_context.rs). What is left
-// here is what the Java keeps in BlockBreakHelper and BlockPlaceHelper for the processes that break and
-// place blocks on their own, outside a path (mining a shaft, farming, building).
+// (pathing_behavior.rs) with the game wrapped as a PlayerContext (game/player_context.rs).
+use super::baritone_input::PathState;
 use super::baritone::Core;
 use super::baritone_aim::AimSettings;
 use super::baritone_calculation_context::{CalculationContext, CostHooks};
 use super::baritone_player_context::PlayerContext;
 use super::baritone_game_ctx::GameCtx;
-use super::baritone_gworld::block_name;
-use super::baritone_toolset::{str_vs_block, tool_slot_for, ToolSettings};
-use super::baritone_inventory as inv;
+use super::baritone_toolset::ToolSettings;
 use super::baritone_pathing_behavior::PathingBehavior;
 use super::baritone_settings::Settings;
-use super::baritone_utils::{feet_of, Pos};
+use super::baritone_utils::Pos;
 use super::Game;
-use horizon_world::registry::BlockStateId;
 
 pub use super::baritone_pathing_behavior::PathingCommand;
 
@@ -39,30 +35,12 @@ pub trait Process {
     fn cancel(&mut self);
 }
 
-/// A block being broken.
-pub struct Dig {
-    pub pos: Pos,
-    pub before: BlockStateId,
-    pub started: u64,
-    pub slot: Option<usize>,
-}
-
-/// Blocks broken and placed by a process itself, outside any path.
-#[derive(Default)]
-pub struct DigState {
-    pub active: Option<Dig>,
-    /// Blocks broken since a process last looked: where, and what.
-    pub broken: Vec<(Pos, String)>,
-    pub next_click: u64,
-    /// Why the last click could not be aimed.
-    pub aim_error: String,
-}
-
-const DIG_LIMIT: u64 = 20 * 40;
+/// `IBaritoneProcess.DEFAULT_PRIORITY`.
+pub const DEFAULT_PRIORITY: f64 = -1.0;
 
 impl Core {
     pub fn player_feet(&self, game: &Game<'_>) -> Option<Pos> {
-        game.player.as_ref().map(|p| feet_of([p.position.x, p.position.y, p.position.z]))
+        super::baritone_gworld::player_feet(game)
     }
 
     /// Run `f` with the pathing behavior and the game as the player it walks.
@@ -138,9 +116,9 @@ impl Core {
         self.pathing.estimated_ticks_to_goal(feet)
     }
 
-    /// Following a path, searching for one, or in the middle of breaking a block.
+    /// Following a path or searching for one.
     pub fn pathing_busy(&self) -> bool {
-        self.pathing.is_busy() || self.dig.active.is_some()
+        self.pathing.is_busy()
     }
 
     /// A path can be dropped without leaving the player in mid-air.
@@ -150,7 +128,6 @@ impl Core {
 
     /// Drop the path and the search, and let go of every key.
     pub fn pathing_cancel(&mut self, game: &mut Game<'_>) {
-        self.dig.active = None;
         self.drive(game, |p, ctx, _| p.force_cancel(ctx));
         self.input.release(game);
     }
@@ -168,13 +145,6 @@ impl Core {
         let aim_settings = AimSettings::of(&self.settings, f64::from(game.settings.sensitivity));
         self.aim.tick(&aim_settings);
         self.drive(game, |p, ctx, s| p.begin_tick(ctx, s, ctx));
-        if self.dig.active.is_some() {
-            self.dig_step(game);
-            self.input.apply(game);
-            return Vec::new();
-        }
-        let pause = PathingCommand::RequestPause;
-        let command = if self.user_paused { Some(&pause) } else { command };
         let hooks = self.path_hooks.take();
         self.drive(game, |p, ctx, s| {
             p.pre_tick(ctx, s, command, hooks.clone(), real_process_changed, ticks);
@@ -188,79 +158,8 @@ impl Core {
         }
         self.input.right_click_speed = self.settings.int("rightClickSpeed");
         self.input.block_break_speed = self.settings.int("blockBreakSpeed");
+        self.input.path = PathState { has_path: self.pathing.has_path(), sprint: self.pathing.sprint_state(), allow_swimming: self.settings.flag("allowSwimming") };
         self.input.apply(game);
         if self.settings.flag("chatDebug") { lines } else { Vec::new() }
-    }
-
-    // -----------------------------------------------------------------------------------
-    // Breaking blocks.
-
-    /// Start breaking the block at `pos`. False when it cannot be broken.
-    pub fn start_dig(&mut self, game: &mut Game<'_>, pos: Pos) -> bool {
-        let before = game.world.block(pos[0], pos[1], pos[2]);
-        let tools = ToolSettings::of(&self.settings);
-        if game.res.facts().get(before).fluid != horizon_client::blocks::Fluid::None || str_vs_block(game, before, &tools) <= 0.0 {
-            return false;
-        }
-        let slot = tool_slot_for(game, before, &tools);
-        self.input.release(game);
-        if let Some(slot) = slot {
-            inv::select(game, slot);
-        }
-        self.dig.active = Some(Dig { pos, before, started: game.ticks, slot });
-        true
-    }
-
-    fn dig_step(&mut self, game: &mut Game<'_>) {
-        let Some(d) = self.dig.active.as_ref() else {
-            return;
-        };
-        let (pos, before, started, slot) = (d.pos, d.before, d.started, d.slot);
-        let now = game.world.block(pos[0], pos[1], pos[2]);
-        if now != before {
-            self.input.hold_attack(false);
-            let name = game.res.facts().get(before).name.to_string();
-            self.dig.broken.push((pos, name));
-            self.dig.active = None;
-            return;
-        }
-        if game.ticks.saturating_sub(started) > DIG_LIMIT {
-            self.input.hold_attack(false);
-            self.dig.active = None;
-            self.say_red(game, "A block would not break.");
-            return;
-        }
-        if let Some(slot) = slot {
-            inv::select(game, slot);
-        }
-        if let Err(why) = game.bar_aim_why(pos) {
-            self.input.hold_attack(false);
-            self.dig.active = None;
-            let feet = self.player_feet(game).unwrap_or([0, 0, 0]);
-            self.say_red(game, &format!("Cannot break {} at {}, {}, {} from {}, {}, {}: {why}", block_name(game, pos).trim_start_matches("minecraft:"), pos[0], pos[1], pos[2], feet[0], feet[1], feet[2]));
-            return;
-        }
-        self.input.hold_attack(true);
-    }
-
-    // -----------------------------------------------------------------------------------
-    // Placing.
-
-    pub fn click_ready(&self, game: &Game<'_>) -> bool {
-        game.ticks >= self.dig.next_click
-    }
-
-    /// Click the `face` of `against` with what is held. False when it cannot be seen from here.
-    pub fn click_block(&mut self, game: &mut Game<'_>, against: Pos, face: [i32; 3]) -> bool {
-        if !self.click_ready(game) {
-            return false;
-        }
-        let done = game.bar_place(against, face);
-        if done {
-            self.dig.next_click = game.ticks + 3;
-        } else if let Err(why) = game.bar_place_why(against, face) {
-            self.dig.aim_error = why;
-        }
-        done
     }
 }

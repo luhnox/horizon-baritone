@@ -5,6 +5,7 @@
 // baritone.command.defaults.
 use super::baritone::Baritone;
 use super::baritone_argument::{Args, CommandError, CommandResult, Paginator};
+pub use super::baritone_argument::{looks_relative, relative, relative_coordinate};
 use super::baritone_cmd_build as build;
 use super::baritone_cmd_meta as meta;
 use super::baritone_cmd_nav as nav;
@@ -12,10 +13,9 @@ use super::baritone_cmd_work as work;
 use super::baritone_goals::{rc, GoalBlock, GoalRef, GoalXZ, GoalYLevel};
 use super::baritone_gworld::{on_server, player_pos};
 use super::baritone_settings as settings;
-use super::baritone_utils::{feet_of, Pos};
+use super::baritone_utils::Pos;
 use super::Game;
 use horizon_client::text::{self, ClickEvent, Style, Text};
-use std::collections::HashSet;
 
 /// The command a clickable chat line runs.
 pub const CLICK: &str = "@baritone";
@@ -236,30 +236,16 @@ pub fn here(game: &Game<'_>) -> CommandResult<[f64; 3]> {
 
 /// The block the player's feet are in.
 pub fn feet(game: &Game<'_>) -> CommandResult<Pos> {
-    Ok(feet_of(here(game)?))
+    super::baritone_gworld::player_feet(game).ok_or_else(|| CommandError::new("Not in a world."))
 }
 
-/// Cancel what is running before something new starts. Off on servers unless allowed.
-pub fn begin(b: &mut Baritone, game: &mut Game<'_>) -> CommandResult {
+/// Whether something may start here: off on servers unless allowed (Horizon's own rule). What is running is not stopped: the process
+/// that became active last takes control, as in the Java.
+pub fn may_start(b: &Baritone, game: &Game<'_>) -> CommandResult {
     if on_server(game) && !b.core.settings.flag("allowOnServers") {
         return Err(CommandError::new("Baritone is off on servers. #set allowOnServers true turns it on, if the server allows it."));
     }
-    b.cancel_everything(game);
     Ok(())
-}
-
-/// A block, and the deepslate form of an ore.
-pub fn with_variants(names: &[String]) -> HashSet<String> {
-    let mut out = HashSet::new();
-    for n in names {
-        out.insert(n.clone());
-        if let Some(ore) = n.strip_prefix("minecraft:").filter(|o| o.ends_with("_ore")) {
-            if !ore.starts_with("deepslate_") && !ore.starts_with("nether_") {
-                out.insert(format!("minecraft:deepslate_{ore}"));
-            }
-        }
-    }
-    out
 }
 
 /// One block name (ForBlockOptionalMeta): `stone`, `minecraft:stone`, or `oak_stairs[facing=north]`.
@@ -274,38 +260,6 @@ pub fn block_optional_meta(b: &mut Baritone, game: &Game<'_>, word: &str) -> Com
     super::baritone_scanner::make_bom(game, word, &mut resolve).map_err(|e| {
         if e.starts_with("Invalid block name") { CommandError::new(format!("Expected a valid block, but got \"{word}\".")) } else { CommandError::new(e) }
     })
-}
-
-/// The rest of the arguments as block names. The set (with variants) and a label for chat.
-pub fn blocks(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult<(HashSet<String>, String)> {
-    let words = args.rest();
-    if words.is_empty() {
-        return Err(CommandError::new("Not enough arguments."));
-    }
-    let mut names = Vec::new();
-    for w in &words {
-        names.push(block_word(b, game, w)?);
-    }
-    while args.optional_string().is_some() {}
-    let label = format!(
-        "BlockOptionalMetaLookup{{[{}]}}",
-        names.iter().map(|n| format!("BlockOptionalMeta{{block=Block{{{n}}},properties={{}}}}")).collect::<Vec<_>>().join(", ")
-    );
-    Ok((with_variants(&names), label))
-}
-
-/// A coordinate the way Baritone's RelativeCoordinate reads one: a number, or `~` and `~5` from the
-/// block the player is in.
-pub fn relative(word: &str, origin: i32) -> Option<i32> {
-    if let Some(rest) = word.strip_prefix('~') {
-        let off = if rest.is_empty() { 0 } else { rest.parse::<i32>().ok()? };
-        return Some(origin + off);
-    }
-    word.parse::<i32>().ok()
-}
-
-pub fn looks_relative(word: &str) -> bool {
-    word.starts_with('~') || word.parse::<i32>().is_ok()
 }
 
 /// RelativeGoal: three coordinates are a block, two a column, one a height; none, where you stand.

@@ -4,7 +4,6 @@
 use super::baritone_costs::{fall_cost, jump_one_block_cost};
 use super::baritone_utils::{maybe_censor, Pos};
 use std::cell::Cell;
-use std::collections::HashSet;
 use std::rc::Rc;
 
 thread_local! {
@@ -39,10 +38,6 @@ pub trait Goal {
     fn elytra_target(&self) -> Option<Pos> {
         None
     }
-    /// The column this goal is in, if it has one (#elytra flies to it).
-    fn column(&self) -> Option<(i32, i32)> {
-        self.render_pos().map(|p| (p[0], p[2]))
-    }
     /// The goal this one turns around, if it is an inversion.
     fn inverted_origin(&self) -> Option<GoalRef> {
         None
@@ -54,28 +49,6 @@ pub trait Goal {
             None => GoalRender::Nothing,
         }
     }
-    /// What to draw for it.
-    fn shapes(&self) -> Vec<Shape> {
-        if let Some(p) = self.render_pos() {
-            vec![Shape::Block(p)]
-        } else if let Some(c) = self.column() {
-            vec![Shape::Column(c.0, c.1)]
-        } else {
-            Vec::new()
-        }
-    }
-}
-
-/// A goal as it is drawn.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Shape {
-    Block(Pos),
-    /// A tall column over a place with no height.
-    Column(i32, i32),
-    /// A flat square at a height.
-    Level(i32),
-    /// Somewhere to keep away from.
-    Avoid(Pos),
 }
 
 /// What PathRenderer does for a goal, in the order of its instanceof ladder.
@@ -171,9 +144,6 @@ impl Goal for GoalXZ {
     fn label(&self) -> String {
         format!("GoalXZ{{x={},z={}}}", maybe_censor(self.0), maybe_censor(self.1))
     }
-    fn column(&self) -> Option<(i32, i32)> {
-        Some((self.0, self.1))
-    }
     fn elytra_target(&self) -> Option<Pos> {
         // ElytraBehavior changes the destination height by itself, depending on whether the player is above or below the roof.
         Some([self.0, 64, self.1])
@@ -195,9 +165,6 @@ impl Goal for GoalYLevel {
     }
     fn label(&self) -> String {
         format!("GoalYLevel{{y={}}}", maybe_censor(self.0))
-    }
-    fn shapes(&self) -> Vec<Shape> {
-        vec![Shape::Level(self.0)]
     }
     fn render_kind(&self) -> GoalRender {
         GoalRender::YLevel(self.0)
@@ -449,11 +416,6 @@ impl Goal for JankyGoalComposite {
     fn render_pos(&self) -> Option<Pos> {
         self.primary.render_pos()
     }
-    fn shapes(&self) -> Vec<Shape> {
-        let mut shapes = self.primary.shapes();
-        shapes.extend(self.fallback.shapes());
-        shapes
-    }
 }
 
 /// Any of several goals: done at the first, as near as the nearest.
@@ -474,12 +436,6 @@ impl Goal for GoalComposite {
     }
     fn render_pos(&self) -> Option<Pos> {
         self.0.first().and_then(|g| g.render_pos())
-    }
-    fn column(&self) -> Option<(i32, i32)> {
-        self.0.first().and_then(|g| g.column())
-    }
-    fn shapes(&self) -> Vec<Shape> {
-        self.0.iter().take(40).flat_map(|g| g.shapes()).collect()
     }
     fn render_kind(&self) -> GoalRender {
         GoalRender::Composite(self.0.clone())
@@ -507,16 +463,6 @@ impl Goal for GoalInverted {
     }
     fn render_kind(&self) -> GoalRender {
         GoalRender::Inverted(self.0.clone())
-    }
-    fn shapes(&self) -> Vec<Shape> {
-        self.0
-            .shapes()
-            .into_iter()
-            .map(|s| match s {
-                Shape::Block(p) => Shape::Avoid(p),
-                other => other,
-            })
-            .collect()
     }
 }
 
@@ -633,11 +579,6 @@ impl Goal for GoalAxis {
 /// A goal in a shared pointer: what the searches and the processes hold.
 pub fn rc<G: Goal + 'static>(goal: G) -> GoalRef {
     Rc::new(goal)
-}
-
-/// Positions as a set, for the goals that are made of many.
-pub fn column_set(goals: &[GoalRef]) -> HashSet<(i32, i32)> {
-    goals.iter().filter_map(|g| g.column()).collect()
 }
 
 #[cfg(test)]

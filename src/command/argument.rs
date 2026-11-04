@@ -13,6 +13,38 @@ impl CommandError {
 
 pub type CommandResult<T = ()> = Result<T, CommandError>;
 
+/// A coordinate the way Baritone's RelativeCoordinate reads one: a number, or `~` and `~5` from the
+/// block the player is in.
+pub fn relative(word: &str, origin: i32) -> Option<i32> {
+    relative_coordinate(word, f64::from(origin)).map(|v| v.floor() as i32)
+}
+
+/// RelativeCoordinate: `^(~?)([+-]?(?:\d+(?:\.\d*)?|\.\d+)([kKmM]?)|)$`. `10k` is 10000, `1.5m` 1500000, `~-5` five back.
+pub fn relative_coordinate(word: &str, origin: f64) -> Option<f64> {
+    let (is_relative, rest) = word.strip_prefix('~').map_or((false, word), |r| (true, r));
+    let offset = if rest.is_empty() { 0.0 } else { scaled_number(rest)? };
+    Some(if is_relative { origin + offset } else { offset })
+}
+
+fn scaled_number(word: &str) -> Option<f64> {
+    let (number, scale) = match word.as_bytes().last()? {
+        b'k' | b'K' => (&word[..word.len() - 1], 1e3),
+        b'm' | b'M' => (&word[..word.len() - 1], 1e6),
+        _ => (word, 1.0),
+    };
+    let digits = number.strip_prefix(['+', '-']).unwrap_or(number);
+    let plain = digits.chars().all(|c| c.is_ascii_digit() || c == '.');
+    let shaped = digits.matches('.').count() <= 1 && digits != ".";
+    if digits.is_empty() || !plain || !shaped {
+        return None;
+    }
+    Some(number.parse::<f64>().ok()? * scale)
+}
+
+pub fn looks_relative(word: &str) -> bool {
+    relative_coordinate(word, 0.0).is_some()
+}
+
 /// The arguments of a command, taken one at a time.
 #[derive(Debug, Clone)]
 pub struct Args {
@@ -23,10 +55,6 @@ pub struct Args {
 impl Args {
     pub fn parse(line: &str) -> Self {
         Self { words: line.split_whitespace().map(str::to_owned).collect(), at: 0 }
-    }
-
-    pub fn from_words(words: Vec<String>) -> Self {
-        Self { words, at: 0 }
     }
 
     pub fn has_any(&self) -> bool {
@@ -43,10 +71,6 @@ impl Args {
 
     pub fn peek(&self) -> Option<&str> {
         self.words.get(self.at).map(String::as_str)
-    }
-
-    pub fn peek_at(&self, n: usize) -> Option<&str> {
-        self.words.get(self.at + n).map(String::as_str)
     }
 
     pub fn rest(&self) -> Vec<String> {
@@ -93,19 +117,6 @@ impl Args {
         Ok(n)
     }
 
-    /// A coordinate: a number, or `~` (where you stand), or `~5`. Whole numbers.
-    pub fn coord(&mut self, here: f64, what: &str) -> CommandResult<i32> {
-        let w = self.peek().ok_or_else(|| CommandError::new(format!("Missing {what}.")))?.to_owned();
-        let n = coordinate(&w, here).ok_or_else(|| CommandError::new(format!("\"{w}\" is not a coordinate ({what}).")))?;
-        self.at += 1;
-        Ok(n)
-    }
-
-    /// Whether the next words are coordinates: a number or a `~`.
-    pub fn looks_like_coordinate(&self) -> bool {
-        self.peek().is_some_and(|w| w.starts_with('~') || w.parse::<i32>().is_ok())
-    }
-
     /// One of some words, any case.
     pub fn one_of(&mut self, options: &[&str], what: &str) -> CommandResult<String> {
         let w = self.string(what)?;
@@ -116,28 +127,20 @@ impl Args {
             .ok_or_else(|| CommandError::new(format!("\"{w}\" is not one of {} ({what}).", options.join(", "))))
     }
 
-    /// The next word if it is one of `options`.
-    pub fn try_one_of(&mut self, options: &[&str]) -> Option<String> {
-        let w = self.peek()?;
-        let found = options.iter().find(|o| o.eq_ignore_ascii_case(w)).map(|o| (*o).to_owned())?;
-        self.at += 1;
-        Some(found)
-    }
-
     pub fn has_exactly(&self, n: usize) -> bool {
         self.remaining() == n
     }
 
     pub fn require_max(&self, n: usize) -> CommandResult {
         if self.remaining() > n {
-            return Err(CommandError::new("Too many arguments."));
+            return Err(CommandError::new(format!("Too many arguments (expected at most {n})")));
         }
         Ok(())
     }
 
     pub fn require_min(&self, n: usize) -> CommandResult {
         if self.remaining() < n {
-            return Err(CommandError::new("Not enough arguments."));
+            return Err(CommandError::new(format!("Not enough arguments (expected at least {n})")));
         }
         Ok(())
     }
@@ -152,22 +155,6 @@ impl Args {
         self.words[..self.at.min(self.words.len())].join(" ")
     }
 
-    /// No more words allowed.
-    pub fn done(&self) -> CommandResult {
-        match self.peek() {
-            None => Ok(()),
-            Some(extra) => Err(CommandError::new(format!("Unexpected argument \"{extra}\"."))),
-        }
-    }
-}
-
-/// `12`, `~`, `~5`, `~-3` as a block coordinate.
-pub fn coordinate(word: &str, here: f64) -> Option<i32> {
-    if let Some(rest) = word.strip_prefix('~') {
-        let off = if rest.is_empty() { 0.0 } else { rest.parse::<f64>().ok()? };
-        return Some((here + off).floor() as i32);
-    }
-    word.parse::<i32>().ok()
 }
 
 /// baritone.api.command.helpers.Paginator: how a list is cut into pages of eight.

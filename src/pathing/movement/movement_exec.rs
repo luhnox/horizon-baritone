@@ -21,8 +21,6 @@ pub struct Env<'a> {
     pub calc: &'a CalculationContext<'a>,
     pub settings: &'a Settings,
     pub path: Option<(&'a [Pos], usize)>,
-    /// `pauseMiningForFallingBlocks` is read where it is needed; this is what the world says.
-    pub now_ticks: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -428,14 +426,12 @@ impl Movement {
             return true;
         }
         let ctx = env.ctx;
-        let mut something_in_the_way = false;
         for &p in &self.positions_to_break {
             if env.settings.flag("pauseMiningForFallingBlocks") && ctx.falling_block_near(p) {
                 return false;
             }
             if !walk_through(env, p) {
                 // Cannot break air, so do not try.
-                something_in_the_way = true;
                 ctx.switch_to_best_tool_for(p);
                 if let Some(rot_towards_block) = ctx.reachable(p, ctx.block_reach_distance(), false) {
                     state.set_target(MovementTarget::new(rot_towards_block, true));
@@ -451,11 +447,6 @@ impl Movement {
                 state.set_input(Input::ClickLeft, true);
                 return false;
             }
-        }
-        if something_in_the_way {
-            // Blocks that cannot be walked through, but no aim reaches any of them: unreachable, not waiting.
-            state.set_status(MovementStatus::Unreachable);
-            return true;
         }
         true
     }

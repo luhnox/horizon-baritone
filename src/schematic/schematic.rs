@@ -187,49 +187,6 @@ impl Schematic for StaticSchematic {
     }
 }
 
-/// Rotate a static schematic a quarter turn about y (clockwise seen from above), turning the
-/// facing of its blocks with it.
-pub fn rotate_quarter(s: &StaticSchematic) -> StaticSchematic {
-    let [w, h, l] = s.size;
-    let mut blocks = vec![None; (w * h * l) as usize];
-    let out = StaticSchematic { size: [l, h, w], blocks: Vec::new(), name: s.name.clone() };
-    for y in 0..h {
-        for z in 0..l {
-            for x in 0..w {
-                let spec = s.blocks[s.index([x, y, z])].clone().map(|mut b| {
-                    for (k, v) in &mut b.props {
-                        if k == "facing" || k == "axis" {
-                            *v = turn_value(k, v);
-                        }
-                    }
-                    b
-                });
-                // (x, z) -> (l - 1 - z, x)
-                blocks[out.index([l - 1 - z, y, x])] = spec;
-            }
-        }
-    }
-    StaticSchematic { blocks, ..out }
-}
-
-fn turn_value(key: &str, v: &str) -> String {
-    if key == "axis" {
-        return match v {
-            "x" => "z".into(),
-            "z" => "x".into(),
-            other => other.to_owned(),
-        };
-    }
-    match v {
-        "north" => "east",
-        "east" => "south",
-        "south" => "west",
-        "west" => "north",
-        other => other,
-    }
-    .to_owned()
-}
-
 /// Several schematics laid out in one box: what a build of more than one selection is. Where two
 /// overlap, the first listed wins.
 pub struct CompositeSchematic {

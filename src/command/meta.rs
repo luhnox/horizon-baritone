@@ -1,13 +1,13 @@
 // baritone.command.defaults: help, set (and its aliases modified and reset), version, repack, gc,
 // render, reloadall, saveall, waypoints (and its aliases sethome and home). Names, aliases,
 // descriptions and messages are Baritone 1.21.4's: SetCommand, WaypointsCommand and the rest.
-use super::baritone::{Baritone, ID, VERSION};
+use super::baritone::{Baritone, SETTINGS_DEFAULT_NAME, VERSION};
 use super::baritone_argument::{Args, CommandError, CommandResult};
 use super::baritone_command::{alias_run, clickable, dimension, feet, help, linked, now_ms, paginate, relative_pos, run_event, Command, CLICK};
 use super::baritone_goals::{rc, GoalBlock};
 use super::baritone_settings::{self as settings, Def, Kind};
 use super::baritone_utils::pos_label;
-use super::baritone_waypoints::{Tag, Waypoint, Waypoints};
+use super::baritone_waypoints::{Tag, Waypoint};
 use super::Game;
 use horizon_client::text::{self, ClickEvent, Style, Text};
 
@@ -41,6 +41,8 @@ pub const COMMANDS: &[Command] = &[
             "> set reset <setting> - Reset a setting to its default",
             "> set toggle <setting> - Toggle a boolean setting",
             "> set save - Save all settings (this is automatic tho)",
+            "> set load - Load settings from settings.txt",
+            "> set load [filename] - Load settings from another file in your minecraft/baritone",
         ],
         alias: "",
         run: set,
@@ -164,7 +166,7 @@ fn setting_by_name(name: &str) -> CommandResult<&'static Def> {
 fn set_line(b: &Baritone, d: &Def) -> Text {
     let prefix = b.core.settings.text("prefix");
     let hover = Text::colored(
-        format!("{}\nType: {}\n\nValue:\n{}", d.name, type_name(d), b.core.settings.get(d.name)),
+        format!("{}\nType: {}\n\nValue:\n{}\n\nDefault Value:\n{}", d.name, type_name(d), b.core.settings.get(d.name), d.default),
         text::GRAY,
     );
     linked(
@@ -177,8 +179,16 @@ fn set_line(b: &Baritone, d: &Def) -> Text {
 fn set(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     let arg = if args.has_any() { args.string("an argument")?.to_ascii_lowercase() } else { "list".to_owned() };
     if arg == "s" || arg == "save" {
-        save_settings(b, game);
+        b.core.save_settings(game);
         b.core.say(game, "Settings saved");
+        return Ok(());
+    }
+    if arg == "load" || arg == "ld" {
+        let file = if args.has_any() { args.string("a file")? } else { SETTINGS_DEFAULT_NAME.to_owned() };
+        for line in b.core.load_settings(game, &file) {
+            b.core.say(game, &line);
+        }
+        b.core.say(game, &format!("Settings reloaded from {file}"));
         return Ok(());
     }
     let view_modified = ["m", "mod", "modified"].contains(&arg.as_str());
@@ -219,7 +229,7 @@ fn set(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
                 b.core.reset_setting(game, d);
             }
             b.core.say(game, "All settings have been reset to their default values");
-            save_settings(b, game);
+            b.core.save_settings(game);
             return Ok(());
         }
     }
@@ -251,8 +261,10 @@ fn set(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
                 return Ok(());
             }
         }
-        let now = b.core.settings.get(d.name).to_owned();
-        b.core.say(game, &format!("Successfully {} {} to {now}", if resetting { "reset" } else { "set" }, d.name));
+        if !toggling {
+            let now = b.core.settings.get(d.name).to_owned();
+            b.core.say(game, &format!("Successfully {} {} to {now}", if resetting { "reset" } else { "set" }, d.name));
+        }
         let undo = clickable(
             &format!("Old value: {old}"),
             text::GRAY,
@@ -269,14 +281,8 @@ fn set(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
             b.core.say_red(game, "Warning: Prefixed commands (like \"#set prefixControl true\") will no longer work. If you want to revert this change, use chat control (if enabled) or click the old value listed above.");
         }
     }
-    save_settings(b, game);
+    b.core.save_settings(game);
     Ok(())
-}
-
-fn save_settings(b: &Baritone, game: &Game<'_>) {
-    for d in settings::DEFS {
-        game.native_set_setting(ID, d.name, b.core.settings.get(d.name));
-    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -291,14 +297,12 @@ fn version(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandRes
 fn repack(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     args.require_max(0)?;
     let n = b.core.world_data.repack(game, 40);
-    b.core.cells.clear();
     b.core.say(game, &format!("Queued {n} chunks for repacking"));
     Ok(())
 }
 
 fn gc(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     args.require_max(0)?;
-    b.core.cells.clear();
     b.core.say(game, "ok called System.gc()");
     Ok(())
 }
@@ -328,7 +332,7 @@ fn reload_all(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> Command
 
 fn save_all(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     args.require_max(0)?;
-    save_settings(b, game);
+    b.core.save_settings(game);
     b.core.save_waypoints(game);
     let Baritone { core, .. } = b;
     core.world_data.save(game, &core.settings);
@@ -573,7 +577,7 @@ fn waypoints(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandR
                     b.core.say(game, &format!("Goal: {name}"));
                 }
                 _ => {
-                    super::baritone_command::begin(b, game)?;
+                    super::baritone_command::may_start(b, game)?;
                     let goal = rc(GoalBlock(w.pos));
                     let name = goal.label();
                     b.procs.goal.set_goal_and_path(goal);

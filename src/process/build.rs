@@ -8,7 +8,7 @@ use super::baritone::Core;
 use super::baritone_block_state::{BlockState, Class};
 use super::baritone_builder_logic::{contains_blockstate, valid, BuilderHooks, ISchematic, LayeredSchematic, ValidSettings};
 use super::baritone_calculation_context::{CalculationContext, CostHooks};
-use super::baritone_goals::{rc, Goal, GoalAdjacent, GoalBlock, GoalBreak, GoalBreakFromAbove, GoalComposite, GoalPlace, GoalRef, JankyGoalComposite};
+use super::baritone_goals::{rc, GoalAdjacent, GoalBlock, GoalBreak, GoalBreakFromAbove, GoalComposite, GoalPlace, GoalRef, JankyGoalComposite};
 use super::baritone_movement_helper as mh;
 use super::baritone_movement_state::Input;
 use super::baritone_pathing::{PathingCommand, Process};
@@ -470,7 +470,7 @@ impl BuilderProcess {
     }
 
     fn trim(&mut self, core: &mut Core, game: &Game<'_>) {
-        let Some(me) = game.player.as_ref().map(|p| super::baritone_utils::feet_of([p.position.x, p.position.y, p.position.z])) else { return };
+        let Some(me) = game.player.as_ref().map(|p| super::baritone_utils::block_pos_of([p.position.x, p.position.y, p.position.z])) else { return };
         let _ = core;
         if let Some(set) = &self.incorrect_positions {
             let copy: HashSet<Pos> = set.iter().copied().filter(|p| dist_sq(*p, me) <= 200).collect();
@@ -792,7 +792,7 @@ impl Process for BuilderProcess {
     }
 
     fn priority(&self) -> f64 {
-        0.0
+        super::baritone_pathing::DEFAULT_PRIORITY
     }
 
     fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, calc_failed: bool, safe_to_cancel: bool) -> PathingCommand {

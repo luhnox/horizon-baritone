@@ -21,6 +21,9 @@ Commands are typed in chat with Baritone's prefix, `#`, and never reach the serv
 completes commands, settings, block names and waypoints. Baritone keeps going with the chat or a menu
 open. It is off on multiplayer servers until `#set allowOnServers true`: most servers ban automation.
 
+The settings you changed are kept in `horizon-mods/.horizon-mod-data/baritone/settings.txt`, one `name value`
+per line as in the Java's `baritone/settings.txt`. Edit it by hand and `#set load` reads it back.
+
 The command names, aliases, descriptions and messages are Baritone 1.21.4's (`baritone.command.defaults`).
 
 ## Install

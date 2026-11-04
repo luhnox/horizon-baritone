@@ -1,12 +1,14 @@
 // baritone.behavior.PathingBehavior: owns the goal, the path being walked (`current`), the one planned
 // to follow it (`next`) and the search in progress. Each tick it lets the executor walk, starts a search
 // when there is none, plans the next segment when the current one is nearly over, and cuts a path off
-// where it should be. The Java runs the search on another thread; here it runs in slices of nodes per
-// tick (`NODES_PER_TICK`), with the Java's timeouts counted in ticks.
-use super::baritone_astar::{AStarPathFinder, Status};
+// where it should be. The Java runs the search on another thread; here it runs in slices of time each
+// tick (`SEARCH_SLICE`), with the Java's timeouts counted in ticks.
+use std::time::{Duration, Instant};
+use super::baritone_astar::{AStarPathFinder, Status, COEFFICIENTS};
 use super::baritone_avoidance::Avoidance;
 use super::baritone_calc_path::Path;
-use super::baritone_calculation_context::{CalculationContext, CostHooks, ToolSet};
+use super::baritone_block_state_interface::SearchBlocks;
+use super::baritone_calculation_context::{CalculationContext, CostHooks, SearchMining, ToolSet};
 use super::baritone_executor::{ExecEnv, PathExecutor};
 use super::baritone_goals::{rc, GoalRef, GoalXZ};
 use super::baritone_movement_helper as mh;
@@ -16,8 +18,10 @@ use super::baritone_utils::{pos_label, Pos};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-/// How many nodes a search expands in one tick: about what the Java manages in a tick on its own thread.
-pub const NODES_PER_TICK: usize = 2500;
+/// How long a search may run in one tick. The Java has a thread of its own for it; here it takes this out of the game's 50 ms.
+const SEARCH_SLICE: Duration = Duration::from_millis(25);
+/// How many nodes between looks at the clock.
+const NODES_BETWEEN_CHECKS: usize = 128;
 
 /// What a process asks of the pathing behavior this tick (baritone.api.utils.PathingCommand).
 pub enum PathingCommand {
@@ -78,6 +82,10 @@ struct Search {
     goal: GoalRef,
     talk_about_it: bool,
     started_tick: u64,
+    started_at: Instant,
+    /// `claimSearchCaches`: they last as long as this search.
+    block_cache: Rc<SearchBlocks>,
+    mining_cache: Rc<SearchMining>,
     primary_timeout_ticks: u64,
     failure_timeout_ticks: u64,
     is_next_segment: bool,
@@ -159,6 +167,11 @@ impl PathingBehavior {
 
     pub fn is_pathing(&self) -> bool {
         self.has_path() && !self.paused_this_tick
+    }
+
+    /// `onPlayerSprintState`: `None` when no path is being walked.
+    pub fn sprint_state(&self) -> Option<bool> {
+        self.current.as_ref().filter(|_| self.is_pathing()).map(PathExecutor::is_sprinting)
     }
 
     pub fn is_calculating(&self) -> bool {
@@ -534,6 +547,9 @@ impl PathingBehavior {
             goal,
             talk_about_it,
             started_tick: ticks,
+            started_at: Instant::now(),
+            block_cache: Rc::default(),
+            mining_cache: Rc::default(),
             primary_timeout_ticks: (primary_ms.max(0) as u64).div_ceil(50),
             failure_timeout_ticks: (failure_ms.max(0) as u64).div_ceil(50),
             is_next_segment,
@@ -582,21 +598,54 @@ impl PathingBehavior {
             self.in_progress = None;
             return;
         }
-        let hooked = calc.clone().with_hooks(search.hooks.clone());
+        let hooked = calc.clone().with_hooks(search.hooks.clone()).with_mining_cache(search.mining_cache.clone());
         let calc = &hooked;
-        // slowPath sleeps slowPathTimeDelayMS before each node, which leaves a tick room for this many.
-        let nodes = if settings.flag("slowPath") { (50 / settings.int("slowPathTimeDelayMS").max(1) as usize).max(1) } else { NODES_PER_TICK };
-        let status = search.finder.run(calc, nodes);
+        calc.bsi.claim_cache(search.block_cache.clone());
+        let begun = Instant::now();
+        let status = if settings.flag("slowPath") {
+            // slowPath sleeps slowPathTimeDelayMS before each node, which leaves a tick room for this many.
+            search.finder.run(calc, (50 / settings.int("slowPathTimeDelayMS").max(1) as usize).max(1))
+        } else {
+            loop {
+                let status = search.finder.run(calc, NODES_BETWEEN_CHECKS);
+                if !matches!(status, Status::Running) || begun.elapsed() >= SEARCH_SLICE {
+                    break status;
+                }
+            }
+        };
+        calc.bsi.release_cache();
         let elapsed = ticks.saturating_sub(search.started_tick);
         let timed_out = elapsed >= search.failure_timeout_ticks || (!search.finder.failing && elapsed >= search.primary_timeout_ticks);
+        let took = format!("Took {}ms, {} movements considered", search.started_at.elapsed().as_millis(), search.finder.num_movements_considered);
+        let mut said: Vec<String> = Vec::new();
         let result: Option<Option<Path>> = match status {
-            Status::Done(p) => Some(Some(p)),
-            Status::Exhausted => Some(search.finder.best_so_far(search.finder.num_nodes)),
-            Status::Running if timed_out => Some(search.finder.best_so_far(search.finder.num_nodes)),
-            Status::Running => None,
+            Status::Done(p) => {
+                said.push(took);
+                Some(Some(p))
+            }
+            Status::Running if !timed_out => None,
+            _ => {
+                match search.finder.best_so_far_report() {
+                    Ok(coefficient) => {
+                        said.push(format!("A* cost coefficient {coefficient:?}"));
+                        said.push(took);
+                    }
+                    Err(best) => {
+                        said.push(format!("Even with a cost coefficient of {:?}, I couldn't get more than {best} blocks", COEFFICIENTS[COEFFICIENTS.len() - 1]));
+                        said.push("No path found =(".to_owned());
+                        if settings.flag("desktopNotifications") {
+                            super::baritone_notification::notify("No path found =(", true);
+                        }
+                    }
+                }
+                Some(search.finder.best_so_far(search.finder.num_nodes))
+            }
         };
         let Some(path) = result else { return };
         let search = self.in_progress.take().expect("checked above");
+        for line in said {
+            self.debug(line);
+        }
         self.finish_search(ctx, settings, calc, search, path);
     }
 
@@ -604,8 +653,20 @@ impl PathingBehavior {
     fn finish_search(&mut self, ctx: &dyn PlayerContext, settings: &Settings, calc: &CalculationContext, search: Search, path: Option<Path>) {
         let processed = path.map(|p| {
             let p = p.post_process(calc);
+            let previous = p.length();
             let p = p.cutoff_at_loaded_chunks(settings.flag("cutoffAtLoadBoundary"), &|x, z| calc.bsi.world_contains_loaded_chunk(x, z));
-            p.static_cutoff(settings.int("pathCutoffMinimumLength").max(0) as usize, settings.float("pathCutoffFactor"))
+            if p.length() < previous {
+                self.debug("Cutting off path at edge of loaded chunks");
+                self.debug(format!("Length decreased by {}", previous - p.length()));
+            } else {
+                self.debug("Path ends within loaded chunks");
+            }
+            let previous = p.length();
+            let p = p.static_cutoff(settings.int("pathCutoffMinimumLength").max(0) as usize, settings.float("pathCutoffFactor"));
+            if p.length() < previous {
+                self.debug(format!("Static cutoff {previous} to {}", p.length()));
+            }
+            p
         });
         let executor = processed.map(PathExecutor::new);
         if self.current.is_none() && !search.is_next_segment {

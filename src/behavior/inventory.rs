@@ -230,26 +230,12 @@ pub fn pickup_click(game: &mut Game<'_>, slot: usize) -> bool {
     }
 }
 
-/// The slot holding the first acceptable item, in the order the setting lists them (the hotbar only).
-pub fn throwaway_slot(game: &Game<'_>, acceptable: &[String]) -> Option<usize> {
-    acceptable.iter().find_map(|item| hotbar_slot(game, |n| bare(n) == bare(item)))
-}
-
 pub fn bucket_slot(game: &Game<'_>) -> Option<usize> {
     hotbar_slot(game, |n| n == "minecraft:water_bucket")
 }
 
 pub fn empty_bucket_slot(game: &Game<'_>) -> Option<usize> {
     hotbar_slot(game, |n| n == "minecraft:bucket")
-}
-
-pub fn firework_slot(game: &Game<'_>) -> Option<usize> {
-    hotbar_slot(game, |n| n == "minecraft:firework_rocket")
-}
-
-/// The slot holding exactly this item (`minecraft:wheat_seeds`).
-pub fn slot_of(game: &Game<'_>, item: &str) -> Option<usize> {
-    hotbar_slot(game, |n| n == item)
 }
 
 /// Hold the stack in `slot`.

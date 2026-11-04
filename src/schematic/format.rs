@@ -141,7 +141,8 @@ fn sponge(root: &Tag, name: String) -> Result<StaticSchematic, String> {
                 return Err("The block data is corrupt.".into());
             }
         }
-        blocks.push(Some(palette.get(value).cloned().unwrap_or_else(BlockSpec::air)));
+        let index = blocks.len();
+        blocks.push(Some(palette.get(value).cloned().ok_or_else(|| format!("Invalid Palette Index {index}"))?));
     }
     Ok(StaticSchematic { size: [w, h, l], blocks, name })
 }
@@ -238,7 +239,10 @@ fn litematic(root: &Tag, name: String) -> Result<StaticSchematic, String> {
             let y = (idx as i32) / (r.size[0] * r.size[2]);
             let p = [r.origin[0] - lo[0] + x, r.origin[1] - lo[1] + y, r.origin[2] - lo[2] + z];
             let at = out.index(p);
-            out.blocks[at] = r.palette.get(value as usize).cloned();
+            // CompositeSchematic: where regions overlap, the first one put in holds the block.
+            if out.blocks[at].is_none() {
+                out.blocks[at] = r.palette.get(value as usize).cloned();
+            }
         }
     }
     Ok(out)

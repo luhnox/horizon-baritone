@@ -1,90 +1,12 @@
 // The game as the pathfinder sees it: what each block state means for walking, the terrain a search
 // reads, the hotbar, the entities, and a cache of where blocks are. This is the one place that
 // touches the game's world; everything in pathing/ stays free of game types.
-use super::baritone_legacy_helper::{Cell, Terrain};
-use super::baritone_utils::{up, Pos};
-use super::baritone_toolset::{str_vs_block, ToolSettings};
+use super::baritone_utils::{feet_of, Pos};
 use super::Game;
-use horizon_client::blocks::Fluid;
-use horizon_core::geometry::Axis;
-use horizon_world::registry::BlockStateId;
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
 };
-
-fn is_danger(name: &str) -> bool {
-    matches!(
-        name,
-        "minecraft:fire"
-            | "minecraft:soul_fire"
-            | "minecraft:cactus"
-            | "minecraft:magma_block"
-            | "minecraft:sweet_berry_bush"
-            | "minecraft:wither_rose"
-            | "minecraft:powder_snow"
-            | "minecraft:cobweb"
-            | "minecraft:campfire"
-            | "minecraft:soul_campfire"
-            | "minecraft:pointed_dripstone"
-            | "minecraft:lava_cauldron"
-            | "minecraft:bubble_column"
-    )
-}
-
-fn is_climbable(name: &str) -> bool {
-    name == "minecraft:ladder"
-        || name == "minecraft:scaffolding"
-        || name == "minecraft:vine"
-        || name.ends_with("_vines")
-        || name.ends_with("_vines_plant")
-}
-
-/// A door or gate a click opens: wooden ones, never iron.
-pub fn is_door(name: &str) -> bool {
-    (name.ends_with("_door") && name != "minecraft:iron_door") || name.ends_with("_fence_gate")
-}
-
-/// The game's own answer for one block state: its facts and its collision shape.
-pub fn classify(game: &Game<'_>, state: BlockStateId) -> Cell {
-    let facts = game.res.facts().get(state);
-    let name: &str = &facts.name;
-    if facts.fluid == Fluid::Lava || name == "minecraft:lava" {
-        return Cell::Lava;
-    }
-    if is_danger(name) {
-        return Cell::Danger;
-    }
-    if is_climbable(name) {
-        return Cell::Climb;
-    }
-    if is_door(name) {
-        // An open one is a doorway; a closed one is opened on the way through.
-        return if game.state_string(state).contains("open=true") { Cell::Air } else { Cell::Door };
-    }
-    if name.ends_with("_stairs") {
-        return Cell::Low;
-    }
-    let shape = game.res.collision().cached_shapes().cached_shape(state);
-    match shape {
-        Ok(Some(shape)) if !shape.is_empty() => {
-            let footprint = [Axis::X, Axis::Z].into_iter().all(|a| shape.min(a) <= 0.0 && shape.max(a) >= 1.0);
-            if footprint && shape.max(Axis::Y) >= 1.0 {
-                Cell::Solid
-            } else if shape.min(Axis::Y) >= 0.0 && shape.max(Axis::Y) <= 0.5 + 1e-6 {
-                Cell::Low
-            } else {
-                Cell::Partial
-            }
-        }
-        Ok(Some(_)) => match facts.fluid {
-            Fluid::Water => Cell::Water,
-            _ => Cell::Air,
-        },
-        // A shape that depends on its neighbours (a fence, a wall): not something to walk through.
-        _ => Cell::Partial,
-    }
-}
 
 /// `getMinY()` and `getMaxY()` of the dimension the player is in.
 pub fn dimension_extent_of(game: &Game<'_>) -> (i32, i32) {
@@ -95,10 +17,6 @@ pub fn dimension_extent_of(game: &Game<'_>) -> (i32, i32) {
 
 pub fn block_name(game: &Game<'_>, p: Pos) -> String {
     game.res.facts().get(game.world.block(p[0], p[1], p[2])).name.to_string()
-}
-
-pub fn block_state_text(game: &Game<'_>, p: Pos) -> String {
-    game.state_string(game.world.block(p[0], p[1], p[2]))
 }
 
 pub fn is_air_at(game: &Game<'_>, p: Pos) -> bool {
@@ -115,73 +33,12 @@ pub fn loaded(game: &Game<'_>, p: Pos) -> bool {
     game.world.chunks.contains_key(&(p[0] >> 4, p[2] >> 4))
 }
 
-/// The world a search reads: each position classified once, each block state once.
-pub struct GameTerrain<'a, 'g> {
-    game: &'a Game<'g>,
-    cells: &'a mut HashMap<u32, Cell>,
-    avoid_breaking: &'a [String],
-    tools: ToolSettings,
-    memo: HashMap<Pos, Cell>,
-    dig: HashMap<u32, Option<f64>>,
-}
-
-impl<'a, 'g> GameTerrain<'a, 'g> {
-    pub fn new(game: &'a Game<'g>, cells: &'a mut HashMap<u32, Cell>, avoid_breaking: &'a [String], tools: ToolSettings) -> Self {
-        Self { game, cells, avoid_breaking, tools, memo: HashMap::new(), dig: HashMap::new() }
-    }
-}
-
-impl Terrain for GameTerrain<'_, '_> {
-    fn cell(&mut self, p: Pos) -> Cell {
-        if let Some(&c) = self.memo.get(&p) {
-            return c;
-        }
-        let c = if p[1] < horizon_client::chunk::MIN_Y {
-            // Below the world: the void.
-            Cell::Lava
-        } else if !loaded(self.game, p) {
-            Cell::Unloaded
-        } else {
-            let state = self.game.world.block(p[0], p[1], p[2]);
-            let game = self.game;
-            *self.cells.entry(state.0 as u32).or_insert_with(|| classify(game, state))
-        };
-        self.memo.insert(p, c);
-        c
-    }
-
-    fn dig_cost(&mut self, p: Pos) -> Option<f64> {
-        let state = self.game.world.block(p[0], p[1], p[2]);
-        let game = self.game;
-        let (avoid, tools) = (self.avoid_breaking, &self.tools);
-        *self.dig.entry(state.0 as u32).or_insert_with(|| {
-            let name = game.res.facts().get(state).name.to_string();
-            let bare = name.strip_prefix("minecraft:").unwrap_or(&name);
-            if avoid.iter().any(|a| a == bare) || bare.ends_with("_bed") || bare.ends_with("shulker_box") {
-                return None;
-            }
-            // MovementHelper.getMiningDurationTicks: a fluid cannot be broken, anything else takes 1 / strVsBlock.
-            let facts = game.res.facts().get(state);
-            if facts.fluid != Fluid::None {
-                return None;
-            }
-            let strength = str_vs_block(game, state, tools);
-            (strength > 0.0).then(|| 1.0 / strength)
-        })
-    }
-}
-
 // ---------------------------------------------------------------------------------------
 // The hotbar.
 
 /// The first hotbar slot holding an item `wanted` accepts.
 pub fn hotbar_slot(game: &Game<'_>, wanted: impl Fn(&str) -> bool) -> Option<usize> {
     (0..9).find(|&i| game.inventory.get(i).and_then(Option::as_ref).is_some_and(|s| s.count > 0 && wanted(&s.item)))
-}
-
-/// How many of an item the whole inventory holds.
-pub fn count_items(game: &Game<'_>, wanted: impl Fn(&str) -> bool) -> u32 {
-    game.inventory.iter().flatten().filter(|s| wanted(&s.item)).map(|s| s.count).sum()
 }
 
 pub fn bare(name: &str) -> &str {
@@ -193,6 +50,13 @@ pub fn bare(name: &str) -> &str {
 
 pub fn player_pos(game: &Game<'_>) -> Option<[f64; 3]> {
     game.player.as_ref().map(|p| [p.position.x, p.position.y, p.position.z])
+}
+
+/// `IPlayerContext.playerFeet`: inside a slab's block means standing on the slab.
+pub fn player_feet(game: &Game<'_>) -> Option<Pos> {
+    let feet = feet_of(player_pos(game)?);
+    let in_slab = game.res.facts().get(game.world.block(feet[0], feet[1], feet[2])).name.ends_with("_slab");
+    Some(if in_slab { [feet[0], feet[1] + 1, feet[2]] } else { feet })
 }
 
 /// A mob (or another player) the follow process can walk after.
@@ -217,13 +81,6 @@ pub fn targets(game: &Game<'_>) -> Vec<Target> {
             name: m.custom_name.clone(),
         })
         .collect()
-}
-
-pub fn nearest<'t>(from: [f64; 3], candidates: impl Iterator<Item = &'t Target>) -> Option<&'t Target> {
-    candidates.min_by(|a, b| {
-        let d = |p: &[f64; 3]| (p[0] - from[0]).powi(2) + (p[1] - from[1]).powi(2) + (p[2] - from[2]).powi(2);
-        d(&a.pos).total_cmp(&d(&b.pos))
-    })
 }
 
 /// Items lying on the ground: where, and what.
@@ -257,12 +114,6 @@ impl WorldCache {
                 self.explored.insert(*k);
             }
         }
-    }
-
-    pub fn forget(&mut self) {
-        self.explored.clear();
-        self.revision = 0;
-        self.ids.clear();
     }
 
     /// Every state id of the blocks called `names`.
@@ -343,37 +194,3 @@ impl WorldCache {
     }
 }
 
-/// The highest block in the column at (x, z) at or below `from`, or None when nothing is there or the
-/// column is not loaded.
-pub fn column_top(game: &Game<'_>, x: i32, z: i32, from: i32) -> Option<i32> {
-    if !game.world.chunks.contains_key(&(x >> 4, z >> 4)) {
-        return None;
-    }
-    let low = (from - 120).max(horizon_client::chunk::MIN_Y);
-    (low..=from).rev().find(|&y| !game.res.facts().is_air(game.world.block(x, y, z)))
-}
-
-/// An ore a player could see without X-ray: one of its faces (or, with `diagonals`, its edges and
-/// corners) touches air, water or lava.
-pub fn exposed(t: &mut dyn Terrain, p: Pos, diagonals: bool) -> bool {
-    for dx in -1..=1 {
-        for dy in -1..=1 {
-            for dz in -1..=1 {
-                let faces = (dx != 0) as i32 + (dy != 0) as i32 + (dz != 0) as i32;
-                if faces == 0 || (faces > 1 && !diagonals) {
-                    continue;
-                }
-                let c = t.cell([p[0] + dx, p[1] + dy, p[2] + dz]);
-                if matches!(c, Cell::Air | Cell::Water | Cell::Lava | Cell::Climb | Cell::Low | Cell::Danger | Cell::Door) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-/// Whether the block above `p` is open to the sky's side: used to find the way out of a cave.
-pub fn open_above(t: &mut dyn Terrain, p: Pos) -> bool {
-    t.cell(up(p, 1)).free()
-}

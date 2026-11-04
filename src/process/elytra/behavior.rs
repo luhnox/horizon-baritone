@@ -9,7 +9,6 @@
 //  * A chunk event does not reach a mod, so loaded chunks are noticed by the chunk set changing, and the ones around the player
 //    are packed again now and then in case a chunk was sent again. The blocks the game sets (BlockChangeEvent) do reach it, and
 //    go into the packed chunks at once.
-//  * A position the server set back is noticed by the player not being where the last tick's motion put them.
 //  * Rays that leave the pathfinder's height are taken as clear: there is nothing above the build limit or under bedrock.
 use super::baritone::Core;
 use super::baritone_aim::AimSettings;
@@ -20,15 +19,25 @@ use super::baritone_elytra_flight::{wants_firework, Aabb, FireworkBoost, FlightS
 use super::baritone_elytra_path_manager::{fix_destination, Job, Note, PathEnv, PathManager};
 use super::baritone_elytra_segment::{PathCalculationError, UnpackedSegment};
 use super::baritone_gworld as gw;
-use super::baritone_inventory as inv;
 use super::baritone_player_context::PlayerContext;
 use super::baritone_rotation::Rotation;
 use super::baritone_settings::Settings;
 use super::Game;
 use super::baritone_game_ctx::GameCtx;
+use std::cell::Cell;
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
+
+thread_local! {
+    /// A `ClientboundPlayerPositionPacket` arrived since the last tick.
+    static SET_BACK: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The game's handler of that packet, for `onReceivePacket`.
+pub fn on_set_back() {
+    SET_BACK.with(|s| s.set(true));
+}
 
 type Pos = [i32; 3];
 
@@ -282,7 +291,6 @@ macro_rules! game_env {
 
 pub struct ElytraBehavior {
     pub destination: Pos,
-    append_destination: bool,
     pub npf: Arc<NetherPathfinderContext>,
     pub path_manager: PathManager,
     finder: FinderKind,
@@ -303,7 +311,6 @@ pub struct ElytraBehavior {
     /// The tick a rocket was first seen attached to the player.
     attached_since: Option<u64>,
     time_last_cache_cull: u64,
-    last_motion: Option<(V3, V3)>,
     // Render.
     pub simulation_line: Option<Vec<V3>>,
     pub aim_pos: Option<Pos>,
@@ -339,6 +346,7 @@ impl ElytraBehavior {
     #[allow(clippy::too_many_arguments)]
     pub fn new(core: &Core, game: &Game<'_>, npf: Arc<NetherPathfinderContext>, destination: Pos, append_destination: bool, in_nether: bool, dimension: &str) -> Self {
         let s = &core.settings;
+        SET_BACK.with(Cell::take); // the behavior only hears the packets from its creation on
         let (min_y, height) = dimension_extent(dimension);
         let finder = if in_nether {
             if s.flag("elytraAllowAboveRoof") && s.flag("elytraAllowAboveBuildLimit") { FinderKind::BuildLimit } else { FinderKind::Nether }
@@ -349,9 +357,8 @@ impl ElytraBehavior {
         };
         Self {
             destination,
-            append_destination,
             npf,
-            path_manager: PathManager::new(destination, append_destination),
+            path_manager: PathManager::new(append_destination),
             finder,
             options: SearchOptions { predict_terrain: s.flag("elytraPredictTerrain") && in_nether, allow_tight_spaces: s.flag("elytraAllowTightSpaces") },
             long_distance_threshold: i64::from(s.int("elytraLongDistanceThreshold")),
@@ -365,7 +372,6 @@ impl ElytraBehavior {
             next_tick_boost_counter: [0; 2],
             attached_since: None,
             time_last_cache_cull: game.ticks,
-            last_motion: None,
             simulation_line: None,
             aim_pos: None,
             visible_path: Vec::new(),
@@ -662,13 +668,10 @@ impl ElytraBehavior {
         let behavior = self;
         core.drive(game, |_pathing, ctx, settings| {
             let snap = PlayerSnapshot::take(ctx);
-            // A server set the player back when they are not where the last tick's motion would put them.
-            if let Some((pos, vel)) = behavior.last_motion {
-                if (snap.position - (pos + vel)).length() > 2.5 {
-                    behavior.remaining_set_back_ticks = setback_delay;
-                }
+            // onReceivePacket: the server set the player's position.
+            if SET_BACK.with(Cell::take) {
+                behavior.remaining_set_back_ticks = setback_delay;
             }
-            behavior.last_motion = Some((snap.position, snap.motion));
 
             behavior.poll_search(ctx, &snap, flags, settings);
 

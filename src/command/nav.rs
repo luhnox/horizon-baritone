@@ -3,13 +3,12 @@
 // resume, paused and cancel. Names, aliases, descriptions and messages are Baritone 1.21.4's.
 use super::baritone::Baritone;
 use super::baritone_argument::{Args, CommandError, CommandResult};
-use super::baritone_command::{begin, blocks, feet, here, relative_goal, Command};
+use super::baritone_command::{may_start, feet, relative_goal, Command};
 use super::baritone_goals::{rc, GoalAxis, GoalBlock, GoalInverted, GoalRef, GoalXZ};
 use super::baritone_gworld::is_air_at;
 use super::baritone_utils::{column_ahead, up};
 use super::Game;
 
-const NO_ARGS_EXTRA: &str = "";
 
 pub const COMMANDS: &[Command] = &[
     Command {
@@ -215,16 +214,16 @@ fn goto(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
         args.require_max(3)?;
         let origin = feet(game)?;
         let goal = relative_goal(args, origin)?;
-        begin(b, game)?;
+        may_start(b, game)?;
         b.core.say(game, &format!("Going to: {}", goal.label()));
         b.procs.goal.set_goal_and_path(goal);
         return Ok(());
     }
     args.require_max(1)?;
-    let word = args.rest().into_iter().next().ok_or_else(|| CommandError::new("Not enough arguments."))?;
+    let word = args.rest().into_iter().next().ok_or_else(|| CommandError::new("Not enough arguments (expected at least 1)"))?;
     let bom = super::baritone_command::block_optional_meta(b, game, &word)?;
     while args.optional_string().is_some() {}
-    begin(b, game)?;
+    may_start(b, game)?;
     let Baritone { core, procs, .. } = b;
     procs.get_to_block.get_to_block(core, game, bom);
     Ok(())
@@ -254,7 +253,7 @@ fn path(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
         b.core.say(game, "No goal set");
         return Ok(());
     }
-    begin(b, game)?;
+    may_start(b, game)?;
     b.procs.goal.path();
     b.core.say(game, "Now pathing");
     Ok(())
@@ -262,9 +261,9 @@ fn path(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
 
 fn proc_command(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     args.require_max(0)?;
-    let (name, priority, display) = b.describe().ok_or_else(|| CommandError::new("No process in control"))?;
+    let (name, priority, temporary, display) = b.describe().ok_or_else(|| CommandError::new("No process in control"))?;
     let last = b.last_command.clone().unwrap_or_else(|| "None".to_owned());
-    b.core.say(game, &format!("Class: {name}\nPriority: {priority:.6}\nTemporary: false\nDisplay name: {display}\nLast command: {last}"));
+    b.core.say(game, &format!("Class: {name}\nPriority: {priority:.6}\nTemporary: {temporary}\nDisplay name: {display}\nLast command: {last}"));
     Ok(())
 }
 
@@ -301,7 +300,7 @@ fn come(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
     args.require_max(0)?;
     // The camera is where the player's eyes are: the block they are in.
     let at = feet(game)?;
-    begin(b, game)?;
+    may_start(b, game)?;
     b.procs.goal.set_goal_and_path(rc(GoalBlock(at)));
     b.core.say(game, "Coming");
     Ok(())
@@ -317,8 +316,7 @@ fn axis(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
 
 fn force_cancel(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     args.require_max(0)?;
-    b.cancel_everything(game);
-    b.core.pathing_reset(game);
+    b.force_cancel(game);
     b.core.say(game, "ok force canceled");
     Ok(())
 }
@@ -330,7 +328,7 @@ fn invert(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
         Some(origin) => origin,
         None => rc(GoalInverted(goal)),
     };
-    begin(b, game)?;
+    may_start(b, game)?;
     b.core.say(game, &format!("Goal: {}", flipped.label()));
     b.procs.goal.set_goal_and_path(flipped);
     Ok(())
@@ -358,7 +356,7 @@ fn surface(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandRes
         let p = [player[0], y, player[2]];
         if !is_air_at(game, p) && y > player[1] {
             let goal: GoalRef = rc(GoalBlock(up(p, 1)));
-            begin(b, game)?;
+            may_start(b, game)?;
             b.core.say(game, &format!("Going to: {}", goal.label()));
             b.procs.goal.set_goal_and_path(goal);
             return Ok(());
@@ -381,38 +379,36 @@ fn thisway(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandRes
 
 fn pause(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     args.require_max(0)?;
-    if b.core.user_paused {
+    if b.procs.pause.paused {
         return Err(CommandError::new("Already paused"));
     }
-    b.core.user_paused = true;
-    b.core.input.release(game);
+    b.procs.pause.paused = true;
     b.core.say(game, "Paused");
     Ok(())
 }
 
 fn resume(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     args.require_max(0)?;
-    if !b.core.user_paused && !b.procs.build.is_paused() {
+    if !b.procs.pause.paused && !b.procs.build.is_paused() {
         return Err(CommandError::new("Not paused"));
     }
     b.procs.build.resume();
-    b.core.user_paused = false;
+    b.procs.pause.paused = false;
     b.core.say(game, "Resumed");
     Ok(())
 }
 
 fn paused(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     args.require_max(0)?;
-    let on = b.core.user_paused;
+    let on = b.procs.pause.paused;
     b.core.say(game, &format!("Baritone is {}paused", if on { "" } else { "not " }));
     Ok(())
 }
 
 fn cancel(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     args.require_max(0)?;
-    b.core.user_paused = false;
+    b.procs.pause.paused = false;
     b.cancel_everything(game);
     b.core.say(game, "ok canceled");
-    let _ = NO_ARGS_EXTRA;
     Ok(())
 }

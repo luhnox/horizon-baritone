@@ -96,9 +96,6 @@ impl Goal for GoalXzMaintainY {
     fn label(&self) -> String {
         GoalXZ(self.x, self.z).label()
     }
-    fn column(&self) -> Option<(i32, i32)> {
-        Some((self.x, self.z))
-    }
 }
 
 fn create_goal(core: &Core, x: i32, z: i32) -> GoalRef {
@@ -244,7 +241,7 @@ impl Process for ExploreProcess {
     }
 
     fn priority(&self) -> f64 {
-        0.0
+        super::baritone_pathing::DEFAULT_PRIORITY
     }
 
     fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, calc_failed: bool, _safe: bool) -> PathingCommand {

@@ -4,7 +4,7 @@
 use super::baritone::Baritone;
 use super::baritone_argument::{Args, CommandError, CommandResult};
 use super::baritone_cmd_build::resolve_file;
-use super::baritone_command::{begin, block_word, blocks, clickable, dimension, feet, here, relative, run_event, Command, CLICK};
+use super::baritone_command::{may_start, block_word, clickable, dimension, feet, here, relative, run_event, Command, CLICK};
 use super::baritone_goals::Goal;
 use super::baritone_gworld::{bare, targets};
 use super::baritone_p_explore::read_filter;
@@ -152,7 +152,7 @@ fn mine(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
         boms.push(super::baritone_command::block_optional_meta(b, game, &word)?);
     }
     while args.optional_string().is_some() {}
-    begin(b, game)?;
+    may_start(b, game)?;
     b.core.say(game, &format!("Mining [{}]", boms.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")));
     let Baritone { core, procs, .. } = b;
     procs.mine.mine(core, game, quantity, Some(super::baritone_bom::BlockOptionalMetaLookup::new(boms)));
@@ -171,7 +171,7 @@ fn pickup(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
             items.push(full);
         }
     }
-    begin(b, game)?;
+    may_start(b, game)?;
     if items.is_empty() {
         b.core.say(game, "Picking up all items");
         b.procs.follow.pickup(Vec::new());
@@ -202,7 +202,7 @@ fn farm(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
             _ => return Err(CommandError::new("Multiple waypoints were found")),
         };
     }
-    begin(b, game)?;
+    may_start(b, game)?;
     b.procs.farm.farm(range, origin);
     b.core.say(game, "Farming");
     Ok(())
@@ -213,7 +213,7 @@ fn follow(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
     args.require_min(1)?;
     if args.has_exactly(1) {
         let group = args.one_of(&["entities", "players"], "a group (entities or players)")?;
-        begin(b, game)?;
+        may_start(b, game)?;
         b.procs.follow.follow(if group == "entities" { Filter::Entities } else { Filter::Players });
         b.core.say(game, &format!("Following all {group}"));
         return Ok(());
@@ -231,7 +231,7 @@ fn follow(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
             }
             kinds.push(id);
         }
-        begin(b, game)?;
+        may_start(b, game)?;
         b.core.say(game, "Following these types of entities:");
         for k in &kinds {
             b.core.say(game, k);
@@ -244,7 +244,7 @@ fn follow(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
         if named.is_empty() {
             return Err(CommandError::new("No valid entities in range!"));
         }
-        begin(b, game)?;
+        may_start(b, game)?;
         b.core.say(game, "Following these entities:");
         for n in &named {
             b.core.say(game, n);
@@ -268,7 +268,7 @@ fn explore(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandRes
     } else {
         (at[0], at[2])
     };
-    begin(b, game)?;
+    may_start(b, game)?;
     b.procs.explore.explore(x, z);
     b.core.say(game, &format!("Exploring from {}", super::baritone_goals::GoalXZ(x, z).label()));
     Ok(())
@@ -438,7 +438,7 @@ fn elytra(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
         }
         let goal = b.procs.goal.most_recent_goal().cloned().ok_or_else(|| CommandError::new("No goal has been set"))?;
         here(game)?;
-        begin(b, game)?;
+        may_start(b, game)?;
         let Baritone { core, procs, .. } = b;
         return procs.elytra.path_to(core, game, &goal).map_err(CommandError::new);
     }

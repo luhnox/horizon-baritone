@@ -36,7 +36,7 @@ impl<'a> ExecEnv<'a> {
     where
         'a: 'b,
     {
-        Env { ctx: self.ctx, calc: self.calc, settings: self.settings, path, now_ticks: self.ticks }
+        Env { ctx: self.ctx, calc: self.calc, settings: self.settings, path }
     }
 }
 

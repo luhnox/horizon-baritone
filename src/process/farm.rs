@@ -68,7 +68,7 @@ impl Process for FarmProcess {
     }
 
     fn priority(&self) -> f64 {
-        0.0
+        super::baritone_pathing::DEFAULT_PRIORITY
     }
 
     fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, calc_failed: bool, is_safe_to_cancel: bool) -> PathingCommand {
@@ -136,11 +136,13 @@ impl Process for FarmProcess {
                 if HARVEST.contains(&name.as_str()) {
                     has_immature_crop = true;
                 }
-                // BonemealableBlock: a crop that is not ripe, a cocoa pod that is not full grown.
+                // BonemealableBlock, of the blocks scanned: a crop that is not ripe, a cocoa pod that is not full
+                // grown, a bamboo stalk that can still grow.
                 let valid_target = match name.as_str() {
                     "wheat" | "carrots" | "potatoes" => Self::state_age(&state) < 7,
                     "beetroots" => Self::state_age(&state) < 3,
                     "cocoa" => Self::state_age(&state) < 2,
+                    "bamboo" => Self::bamboo_can_grow(ctx, *pos),
                     _ => false,
                 };
                 if valid_target {
@@ -327,6 +329,14 @@ fn core_flags(s: &super::baritone_settings::Settings) -> Flags {
 }
 
 impl FarmProcess {
+    /// BambooStalkBlock.isValidBonemealTarget: under 16 tall, and the top is not done growing.
+    fn bamboo_can_grow(ctx: &dyn PlayerContext, pos: Pos) -> bool {
+        let bamboo = |y: i32| bare(&ctx.bsi().get0(pos[0], y, pos[2]).name) == "bamboo";
+        let above = (1..=16).take_while(|i| bamboo(pos[1] + i)).count() as i32;
+        let below = (1..=16).take_while(|i| bamboo(pos[1] - i)).count() as i32;
+        above + below + 1 < 16 && ctx.bsi().get0(pos[0], pos[1] + above, pos[2]).prop("stage") != Some("1")
+    }
+
     fn ready_for_harvest_in(name: &str, state: &super::baritone_block_state::BlockState, ctx: &dyn PlayerContext, pos: Pos, flags: &Flags) -> bool {
         let below = ctx.bsi().get0(pos[0], pos[1] - 1, pos[2]);
         match name {

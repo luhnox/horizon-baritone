@@ -3,7 +3,6 @@
 use super::baritone_calculation_context::{CalculationContext, MutableMoveResult};
 use super::baritone_costs::{COST_INF, SPRINT_ONE_BLOCK_COST, WALK_ONE_BLOCK_COST};
 use super::baritone_block_state::Class;
-use super::baritone_block_state_interface::BlockStateInterface;
 use super::baritone_movement_helper as mh;
 
 /// `dir` is the horizontal step (dx, dz) of the jump.

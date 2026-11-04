@@ -407,7 +407,7 @@ impl Process for MineProcess {
     }
 
     fn priority(&self) -> f64 {
-        0.0
+        super::baritone_pathing::DEFAULT_PRIORITY
     }
 
     fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, calc_failed: bool, is_safe_to_cancel: bool) -> PathingCommand {

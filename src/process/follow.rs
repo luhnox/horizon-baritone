@@ -5,7 +5,7 @@ use super::baritone::Core;
 use super::baritone_goals::{rc, GoalBlock, GoalComposite, GoalNear, GoalRef};
 use super::baritone_gworld::{bare, dropped_items, player_pos, targets, Target};
 use super::baritone_pathing::{PathingCommand, Process};
-use super::baritone_utils::feet_of;
+use super::baritone_utils::block_pos_of;
 use super::Game;
 
 /// What is followed.
@@ -107,10 +107,10 @@ impl Process for FollowProcess {
     }
 
     fn priority(&self) -> f64 {
-        0.0
+        super::baritone_pathing::DEFAULT_PRIORITY
     }
 
-    fn on_tick(&mut self, core: &mut Core, game: &mut Game<'_>, _calc_failed: bool, _safe: bool) -> PathingCommand {
+    fn on_tick(&mut self, core: &mut Core, _game: &mut Game<'_>, _calc_failed: bool, _safe: bool) -> PathingCommand {
         if self.cache.is_empty() {
             return PathingCommand::Defer;
         }
@@ -125,7 +125,7 @@ impl Process for FollowProcess {
                     let g = super::baritone_goals::GoalXZ::from_direction(*p, core.settings.float("followOffsetDirection") as f32, f64::from(offset));
                     at = [f64::from(g.0), p[1], f64::from(g.1)];
                 }
-                if self.into { rc(GoalBlock(feet_of(at))) } else { rc(GoalNear(feet_of(at), radius)) }
+                if self.into { rc(GoalBlock(block_pos_of(at))) } else { rc(GoalNear(block_pos_of(at), radius)) }
             })
             .collect();
         PathingCommand::RevalidateGoalAndPath(rc(GoalComposite(goals)))

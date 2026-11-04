@@ -642,6 +642,31 @@ impl Settings {
         Self { values }
     }
 
+    /// `SettingsUtil.save`: one `name value` line for each setting that is not at its default.
+    pub fn to_file_text(&self) -> String {
+        DEFS.iter().filter(|d| self.modified(d)).map(|d| format!("{} {}\n", d.name, self.get(d.name))).collect()
+    }
+
+    /// `SettingsUtil.readAndApply`, from the text of a settings file: what could not be read comes back as the
+    /// lines to tell the player, and everything else still applies.
+    pub fn apply_file_text(&mut self, text: &str) -> Vec<String> {
+        let mut complaints = Vec::new();
+        for line in text.lines() {
+            if line.is_empty() || line.starts_with('#') || line.starts_with("//") {
+                continue;
+            }
+            let Some((name, value)) = line.split_once(' ').filter(|(n, v)| !n.is_empty() && !v.trim_start_matches(' ').is_empty()) else {
+                complaints.push(format!("Invalid syntax in setting file: {line}"));
+                continue;
+            };
+            let name = if name.eq_ignore_ascii_case("allowjumpat256") { "allowJumpAtBuildLimit" } else { name };
+            if self.set(name, value.trim_start_matches(' ')).is_err() {
+                complaints.push(format!("Unable to parse line {line}"));
+            }
+        }
+        complaints
+    }
+
     pub fn get(&self, name: &str) -> &str {
         self.values
             .get(name)
@@ -710,6 +735,21 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_settings_file_keeps_only_what_changed_and_reads_back() {
+        let mut s = Settings::load(|_| None);
+        assert_eq!(s.to_file_text(), "");
+        s.set("allowBreak", "false").unwrap();
+        s.set("prefix", "$").unwrap();
+        let text = s.to_file_text();
+        assert!(text.contains("allowBreak false\n") && text.contains("prefix $\n"), "{text}");
+        let mut read = Settings::load(|_| None);
+        let complaints = read.apply_file_text(&format!("# a comment\n// another\n\n{text}allowsprint   false\nnoSuchSetting 1\nalone\n"));
+        assert_eq!(complaints, ["Unable to parse line noSuchSetting 1", "Invalid syntax in setting file: alone"]);
+        assert!(!read.flag("allowBreak") && !read.flag("allowSprint"));
+        assert_eq!(read.text("prefix"), "$");
+    }
 
     #[test]
     fn the_exotic_settings_parse_as_the_java_does() {
