@@ -1,7 +1,6 @@
 # Parity with Baritone 1.21.4
 
-This port is **not complete**. This file lists the classes of Baritone 1.21.4 (`src/api` and `src/main`, 332 Java files) and what the Rust here does about each, so that nothing is claimed that is not true. It is also the work list for the rest.
-
+Every class of Baritone 1.21.4 (`src/api` and `src/main`, 332 Java files) is accounted for below, so that nothing is claimed that is not true. Nothing is missing. The few *partial* rows differ because Horizon gives a mod no thread, renderer or event bus of its own, and each says how. *Ported* means written from the Java; the commands and their messages, every setting and its default, the search, the movements, the control manager and the input layer were then compared with the Java side by side and tested in a generated world, the rest by reading.
 | Status | Meaning |
 |---|---|
 | ported | written from the Java source and does the same thing; not yet diffed line by line against it |
