@@ -124,6 +124,7 @@ fn run_inner(b: &mut Baritone, game: &mut Game<'_>, line: &str) {
         b.core.say_red(game, &format!("Command not found: {name}"));
         return;
     };
+    args.forget_consumed();
     if !command.alias.is_empty() {
         let target = format!("{} {}", command.alias, args.rest_joined());
         return run_inner(b, game, target.trim());
@@ -243,17 +244,15 @@ pub fn feet(game: &Game<'_>) -> CommandResult<Pos> {
 }
 
 /// One block name (ForBlockOptionalMeta): `stone`, `minecraft:stone`, or `oak_stairs[facing=north]`.
-pub fn block_word(b: &mut Baritone, game: &Game<'_>, word: &str) -> CommandResult<String> {
+pub fn block_word(b: &mut Baritone, game: &Game<'_>, args: &Args, datatype: &str, word: &str) -> CommandResult<String> {
     let bare = word.split('[').next().unwrap_or(word);
-    b.core.block_named(game, bare).ok_or_else(|| CommandError::new(format!("Expected a valid block, but got \"{word}\".")))
+    b.core.block_named(game, bare).ok_or_else(|| args.invalid_datatype(datatype))
 }
 
 /// One BlockOptionalMeta (ForBlockOptionalMeta): the block, with the properties typed, and what it drops.
-pub fn block_optional_meta(b: &mut Baritone, game: &Game<'_>, word: &str) -> CommandResult<super::baritone_bom::BlockOptionalMeta> {
+pub fn block_optional_meta(b: &mut Baritone, game: &Game<'_>, args: &Args, word: &str) -> CommandResult<super::baritone_bom::BlockOptionalMeta> {
     let mut resolve = |id: &str| b.core.block_named(game, id);
-    super::baritone_scanner::make_bom(game, word, &mut resolve).map_err(|e| {
-        if e.starts_with("Invalid block name") { CommandError::new(format!("Expected a valid block, but got \"{word}\".")) } else { CommandError::new(e) }
-    })
+    super::baritone_scanner::make_bom(game, word, &mut resolve).map_err(|_| args.invalid_datatype("ForBlockOptionalMeta"))
 }
 
 /// RelativeGoal: three coordinates are a block, two a column, one a height; none, where you stand.
@@ -262,8 +261,7 @@ pub fn relative_goal(args: &mut Args, origin: Pos) -> CommandResult<GoalRef> {
     while words.len() < 3 && args.peek().is_some_and(looks_relative) {
         words.push(args.optional_string().unwrap_or_default());
     }
-    let bad = |w: &str| CommandError::new(format!("Expected a valid coordinate, but got \"{w}\"."));
-    let n = |i: usize, o: i32, words: &[String]| relative(&words[i], o).ok_or_else(|| bad(&words[i]));
+    let n = |i: usize, o: i32, words: &[String]| relative(&words[i], o).ok_or_else(|| args.invalid_datatype("RelativeGoal"));
     match words.len() {
         0 => Ok(rc(GoalBlock(origin))),
         1 => Ok(rc(GoalYLevel(n(0, origin[1], &words)?))),
@@ -277,7 +275,7 @@ pub fn relative_pos(args: &mut Args, origin: Pos) -> CommandResult<Pos> {
     let mut out = [0; 3];
     for i in 0..3 {
         let w = args.string("a coordinate")?;
-        out[i] = relative(&w, origin[i]).ok_or_else(|| CommandError::new(format!("Expected a valid coordinate, but got \"{w}\".")))?;
+        out[i] = relative(&w, origin[i]).ok_or_else(|| args.invalid_datatype("RelativeBlockPos"))?;
     }
     Ok(out)
 }

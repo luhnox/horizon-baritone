@@ -9,7 +9,7 @@ This port is **not complete**. This file lists the classes of Baritone 1.21.4 (`
 | missing | not written |
 | n/a | Java or Minecraft machinery with no meaning in Rust on Horizon (mixin accessors, the event bus, toasts) |
 
-Rows below: 297 (classes that go together share a row). ported 229, partial 13, missing 0, n/a 55.
+Rows below: 297 (classes that go together share a row). ported 234, partial 8, missing 0, n/a 55.
 
 All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from Settings.java, with the Java type `#set` prints), and every one is read by something, except five that have nothing to act on in Horizon: `logAsToast` (no way to push a toast of its own), `renderGoalXZBeacon`, `renderCachedChunks` and `cachedChunksOpacity` (no way to draw a beam or the cached world), and `pathingMapLoadFactor` (it tunes the Java hash map). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`. What is left in the rows below is mostly what needs a renderer of the game own: the toast, the beacon beam and the semitransparent cached chunks.
 
@@ -72,8 +72,8 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 
 | Java | Status | Rust or note |
 |---|---|---|
-| IArgConsumer | partial | src/command/argument.rs (Args): the methods the commands use; a wrong value says what was expected in words, not the Java class name |
-| ICommandArgument | partial | src/command/argument.rs: words, without their index |
+| IArgConsumer | ported | src/command/argument.rs (Args): requireMin/Max, get*, peek*; errors read "Error at argument #N: Expected X" |
+| ICommandArgument | ported | src/command/argument.rs: the word; its number is the position in Args |
 
 ## api/command/datatypes
 
@@ -97,7 +97,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 
 | Java | Status | Rust or note |
 |---|---|---|
-| CommandErrorMessageException, CommandException, CommandInvalidArgumentException, CommandInvalidStateException, CommandInvalidTypeException, CommandNoParserForTypeException, CommandNotEnoughArgumentsException, CommandNotFoundException, CommandTooManyArgumentsException, CommandUnhandledException, ICommandException | partial | one CommandError carrying the same messages |
+| CommandErrorMessageException, CommandException, CommandInvalidArgumentException, CommandInvalidStateException, CommandInvalidTypeException, CommandNoParserForTypeException, CommandNotEnoughArgumentsException, CommandNotFoundException, CommandTooManyArgumentsException, CommandUnhandledException, ICommandException | ported | one CommandError carrying the Java messages: Error at argument #N: Expected X, Not enough arguments, Too many arguments; a panic in a command is CommandUnhandledException |
 
 ## api/command/helpers
 
@@ -281,8 +281,8 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | ExampleBaritoneControl | ported | src/baritone.rs (chat), src/command/manager.rs (run), src/command/tab.rs |
 | ArgParserManager | n/a | typed parsers are methods of Args |
 | DefaultArgParsers | n/a | typed parsers are methods of Args |
-| ArgConsumer | partial | src/command/argument.rs (Args): as IArgConsumer |
-| CommandArgument | partial | src/command/argument.rs: as ICommandArgument |
+| ArgConsumer | ported | src/command/argument.rs (Args) |
+| CommandArgument | ported | src/command/argument.rs |
 | CommandArguments | n/a | typed parsers are methods of Args |
 | CommandManager | ported | src/command/manager.rs |
 

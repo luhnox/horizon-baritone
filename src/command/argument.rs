@@ -9,6 +9,13 @@ impl CommandError {
     pub fn new(message: impl Into<String>) -> Self {
         Self(message.into())
     }
+
+    /// `CommandInvalidArgumentException`: the message of an argument that was not what the command expects. `number` counts
+    /// from 1, the first word after the command.
+    pub fn at_argument(number: Option<usize>, message: impl std::fmt::Display) -> Self {
+        let number = number.map_or_else(|| "<unknown>".to_owned(), |n| n.to_string());
+        Self(format!("Error at argument #{number}: {message}"))
+    }
 }
 
 pub type CommandResult<T = ()> = Result<T, CommandError>;
@@ -57,6 +64,38 @@ impl Args {
         Self { words: line.split_whitespace().map(str::to_owned).collect(), at: 0 }
     }
 
+    /// The words taken so far are the command, not its arguments: they are not counted in an argument's number.
+    pub fn forget_consumed(&mut self) {
+        self.words.drain(..self.at.min(self.words.len()));
+        self.at = 0;
+    }
+
+    /// `consumed()`: the number of the last word taken, `None` when nothing was.
+    fn consumed_number(&self) -> Option<usize> {
+        (self.at > 0).then_some(self.at)
+    }
+
+    /// `CommandInvalidTypeException(args.consumed(), expected)`.
+    pub fn invalid_type(&self, expected: &str) -> CommandError {
+        CommandError::at_argument(self.consumed_number(), format!("Expected {expected}"))
+    }
+
+    /// `CommandInvalidTypeException(args.consumed(), expected, got)`.
+    pub fn invalid_type_got(&self, expected: &str, got: &str) -> CommandError {
+        CommandError::at_argument(self.consumed_number(), format!("Expected {expected}, but got {got} instead"))
+    }
+
+    /// The error of a datatype that could not be read: `hasAny() ? peek() : consumed()`, named by the datatype's class.
+    pub fn invalid_datatype(&self, datatype: &str) -> CommandError {
+        let number = if self.has_any() { Some(self.at + 1) } else { self.consumed_number() };
+        CommandError::at_argument(number, format!("Expected {datatype}"))
+    }
+
+    /// `CommandNotEnoughArgumentsException`.
+    fn not_enough(&self) -> CommandError {
+        CommandError::new("Not enough arguments (expected at least 1)")
+    }
+
     pub fn has_any(&self) -> bool {
         self.at < self.words.len()
     }
@@ -81,9 +120,9 @@ impl Args {
         self.rest().join(" ")
     }
 
-    /// The next word, or the error that says what was expected.
-    pub fn string(&mut self, what: &str) -> CommandResult<String> {
-        let w = self.words.get(self.at).cloned().ok_or_else(|| CommandError::new(format!("Missing {what}.")))?;
+    /// The next word. `_what` says what the command wants there, for whoever reads the call.
+    pub fn string(&mut self, _what: &str) -> CommandResult<String> {
+        let w = self.words.get(self.at).cloned().ok_or_else(|| self.not_enough())?;
         self.at += 1;
         Ok(w)
     }
@@ -96,9 +135,10 @@ impl Args {
         w
     }
 
-    pub fn int(&mut self, what: &str) -> CommandResult<i32> {
-        let w = self.peek().ok_or_else(|| CommandError::new(format!("Missing {what}.")))?.to_owned();
-        let n = w.parse().map_err(|_| CommandError::new(format!("\"{w}\" is not a whole number ({what}).")))?;
+    /// `getAs(Integer.class)`: a word that is not one is `Expected Integer`, and has been taken.
+    pub fn int(&mut self, _what: &str) -> CommandResult<i32> {
+        let w = self.peek().ok_or_else(|| self.not_enough())?.to_owned();
+        let n = w.parse().map_err(|_| CommandError::at_argument(Some(self.at + 1), "Expected Integer"))?;
         self.at += 1;
         Ok(n)
     }
@@ -110,21 +150,22 @@ impl Args {
         Some(n)
     }
 
-    pub fn float(&mut self, what: &str) -> CommandResult<f64> {
-        let w = self.peek().ok_or_else(|| CommandError::new(format!("Missing {what}.")))?.to_owned();
-        let n = w.parse().map_err(|_| CommandError::new(format!("\"{w}\" is not a number ({what}).")))?;
+    /// `getAs(Double.class)`.
+    pub fn float(&mut self, _what: &str) -> CommandResult<f64> {
+        let w = self.peek().ok_or_else(|| self.not_enough())?.to_owned();
+        let n = w.parse().map_err(|_| CommandError::at_argument(Some(self.at + 1), "Expected Double"))?;
         self.at += 1;
         Ok(n)
     }
 
-    /// One of some words, any case.
-    pub fn one_of(&mut self, options: &[&str], what: &str) -> CommandResult<String> {
-        let w = self.string(what)?;
+    /// `getEnum`: one of some words, any case, or `Expected` and the name of the enum.
+    pub fn one_of(&mut self, options: &[&str], enum_name: &str) -> CommandResult<String> {
+        let w = self.string(enum_name)?;
         options
             .iter()
             .find(|o| o.eq_ignore_ascii_case(&w))
             .map(|o| (*o).to_owned())
-            .ok_or_else(|| CommandError::new(format!("\"{w}\" is not one of {} ({what}).", options.join(", "))))
+            .ok_or_else(|| self.invalid_type(enum_name))
     }
 
     pub fn has_exactly(&self, n: usize) -> bool {
@@ -191,8 +232,10 @@ impl Paginator {
         if !args.has_any() {
             return Ok(1);
         }
-        let word = args.string("a page")?;
-        let page = word.parse::<usize>().ok().filter(|p| self.valid_page(*p));
-        page.ok_or_else(|| CommandError::new(format!("Expected a valid page (1-{}), but got \"{word}\".", self.max_page())))
+        let page = args.int("a page")?;
+        if page > 0 && self.valid_page(page as usize) {
+            return Ok(page as usize);
+        }
+        Err(args.invalid_type_got(&format!("a valid page (1-{})", self.max_page()), &page.to_string()))
     }
 }

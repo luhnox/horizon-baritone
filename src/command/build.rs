@@ -253,10 +253,10 @@ impl Action {
 /// ForBlockOptionalMeta: a block, with the properties that were typed.
 fn block_spec(b: &mut Baritone, game: &Game<'_>, args: &mut Args) -> CommandResult<BlockSpec> {
     let word = args.string("a block")?;
-    spec_of(b, game, &word)
+    spec_of(b, game, args, &word)
 }
 
-fn spec_of(b: &mut Baritone, game: &Game<'_>, word: &str) -> CommandResult<BlockSpec> {
+fn spec_of(b: &mut Baritone, game: &Game<'_>, args: &Args, word: &str) -> CommandResult<BlockSpec> {
     let (bare, props) = match word.split_once('[') {
         Some((n, p)) => (n, format!("[{p}")),
         None => (word, String::new()),
@@ -264,23 +264,23 @@ fn spec_of(b: &mut Baritone, game: &Game<'_>, word: &str) -> CommandResult<Block
     let full = b
         .core
         .block_named(game, bare)
-        .ok_or_else(|| CommandError::new(format!("Expected a valid block, but got \"{word}\".")))?;
+        .ok_or_else(|| args.invalid_datatype("ForBlockOptionalMeta"))?;
     Ok(BlockSpec::parse(&format!("{full}{props}")))
 }
 
 /// ForAxis.
-fn axis_of(word: &str) -> CommandResult<usize> {
+fn axis_of(args: &Args, word: &str) -> CommandResult<usize> {
     match word.to_ascii_lowercase().as_str() {
         "x" => Ok(0),
         "y" => Ok(1),
         "z" => Ok(2),
-        _ => Err(CommandError::new(format!("Expected a valid axis (x, y or z), but got \"{word}\"."))),
+        _ => Err(args.invalid_datatype("ForAxis")),
     }
 }
 
 /// ForDirection.
-fn direction_of(word: &str) -> CommandResult<[i32; 3]> {
-    direction_vector(word).ok_or_else(|| CommandError::new(format!("Expected a valid direction, but got \"{word}\".")))
+fn direction_of(args: &Args, word: &str) -> CommandResult<[i32; 3]> {
+    direction_vector(word).ok_or_else(|| args.invalid_datatype("ForDirection"))
 }
 
 fn lowest(sels: &[Selection]) -> Pos {
@@ -298,7 +298,7 @@ fn offset(a: Pos, b: Pos) -> Pos {
 
 fn sel(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     let word = args.string("an action")?;
-    let action = Action::by_name(&word).ok_or_else(|| CommandError::new(format!("Expected an action, but got \"{word}\".")))?;
+    let action = Action::by_name(&word).ok_or_else(|| args.invalid_type("an action"))?;
     match action {
         Action::Pos1 | Action::Pos2 => {
             if action == Action::Pos2 && b.core.sel_pos1.is_none() {
@@ -351,7 +351,8 @@ fn sel(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
             } else if matches!(a, Action::Cylinder | Action::HCylinder) {
                 args.require_max(1)?;
                 if args.has_any() {
-                    axis = axis_of(&args.string("an axis")?)?;
+                    let word = args.string("an axis")?;
+                    axis = axis_of(args, &word)?;
                 }
             } else {
                 args.require_max(0)?;
@@ -436,7 +437,8 @@ fn sel(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
         Action::Expand | Action::Contract | Action::Shift => {
             args.require_exactly(3)?;
             let target = TransformTarget::by_name(&args.string("a target")?).ok_or_else(|| CommandError::new("Invalid transform type"))?;
-            let dir = direction_of(&args.string("a direction")?)?;
+            let word = args.string("a direction")?;
+            let dir = direction_of(args, &word)?;
             let blocks = args.int("a number of blocks")?;
             let count = b.core.selections.selections.len();
             if count < 1 {

@@ -174,6 +174,24 @@ mod extras {
     }
 
     #[test]
+    fn an_argument_that_is_not_what_was_asked_for_reads_as_the_java_says_it() {
+        use crate::baritone_argument::Args;
+        let mut a = Args::parse("goto abc 12 x");
+        assert_eq!(a.string("command").unwrap(), "goto");
+        a.forget_consumed();
+        assert_eq!(a.int("n").unwrap_err().0, "Error at argument #1: Expected Integer");
+        assert_eq!(a.string("w").unwrap(), "abc");
+        assert_eq!(a.int("n").unwrap(), 12);
+        assert_eq!(a.invalid_type("an action").0, "Error at argument #2: Expected an action");
+        assert_eq!(a.invalid_datatype("ForAxis").0, "Error at argument #3: Expected ForAxis", "a word still waiting is the one named");
+        assert_eq!(a.string("w").unwrap(), "x");
+        assert_eq!(a.invalid_datatype("ForAxis").0, "Error at argument #3: Expected ForAxis");
+        assert_eq!(a.string("w").unwrap_err().0, "Not enough arguments (expected at least 1)");
+        assert_eq!(Args::parse("").invalid_type("an action").0, "Error at argument #<unknown>: Expected an action");
+        assert_eq!(a.invalid_type_got("a toggleable setting", "some other setting").0, "Error at argument #3: Expected a toggleable setting, but got some other setting instead");
+    }
+
+    #[test]
     fn a_coordinate_reads_as_the_java_reads_it() {
         use crate::baritone_argument::{looks_relative, relative, relative_coordinate};
         assert_eq!(relative("10", 5), Some(10));
@@ -197,7 +215,7 @@ mod extras {
         assert_eq!(a.string("command").unwrap(), "goto");
         assert!(a.int("n").is_err());
         assert_eq!(a.string("foo").unwrap(), "foo");
-        assert_eq!(a.string("more").unwrap_err().0, "Missing more.");
+        assert_eq!(a.string("more").unwrap_err().0, "Not enough arguments (expected at least 1)");
         let mut b = Args::parse("3 stone dirt");
         assert_eq!(b.try_int(), Some(3));
         assert_eq!(b.try_int(), None);

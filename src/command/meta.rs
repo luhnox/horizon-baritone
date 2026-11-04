@@ -159,8 +159,8 @@ fn type_name(d: &Def) -> &'static str {
     settings::java_type(d.name)
 }
 
-fn setting_by_name(name: &str) -> CommandResult<&'static Def> {
-    settings::find(name).ok_or_else(|| CommandError::new(format!("Expected a valid setting, but got \"{name}\".")))
+fn setting_by_name(args: &Args, name: &str) -> CommandResult<&'static Def> {
+    settings::find(name).ok_or_else(|| args.invalid_type("a valid setting"))
 }
 
 fn set_line(b: &Baritone, d: &Def) -> Text {
@@ -237,7 +237,7 @@ fn set(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
         args.require_min(1)?;
     }
     let name = if doing_something { args.string("a setting")? } else { arg.clone() };
-    let d = setting_by_name(&name)?;
+    let d = setting_by_name(args, &name)?;
     if !doing_something && !args.has_any() {
         b.core.say(game, &format!("Value of setting {}:", d.name));
         let value = b.core.settings.get(d.name).to_owned();
@@ -248,7 +248,7 @@ fn set(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
             b.core.reset_setting(game, d);
         } else if toggling {
             if d.kind != Kind::Bool {
-                return Err(CommandError::new(format!("Expected a toggleable setting, but got \"some other setting\" ({}).", d.name)));
+                return Err(args.invalid_type_got("a toggleable setting", "some other setting"));
             }
             let flipped = if b.core.settings.flag(d.name) { "false" } else { "true" };
             b.core.set_setting(game, d.name, flipped).map_err(CommandError)?;
@@ -257,8 +257,7 @@ fn set(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
         } else {
             let value = args.string("a value")?;
             if b.core.set_setting(game, d.name, &value).is_err() {
-                b.core.say(game, "Unable to parse setting");
-                return Ok(());
+                return Err(args.invalid_type("a valid value"));
             }
         }
         if !toggling {
@@ -424,7 +423,7 @@ fn waypoints(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandR
             .iter()
             .find(|(_, names)| names.iter().any(|n| n.eq_ignore_ascii_case(&w)))
             .map(|(a, _)| *a)
-            .ok_or_else(|| CommandError::new(format!("Expected an action, but got \"{w}\".")))?
+            .ok_or_else(|| args.invalid_type("an action"))?
     } else {
         Action::List
     };
@@ -498,7 +497,7 @@ fn waypoints(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandR
                 args.optional_string();
                 while args.has_any() {
                     let w = args.string("a timestamp")?;
-                    let ts: u64 = w.parse().map_err(|_| CommandError::new(format!("Expected a valid number, but got \"{w}\".")))?;
+                    let ts: u64 = w.parse().map_err(|_| args.invalid_type("Long"))?;
                     if let Some(found) = b.core.deleted_waypoints.iter().find(|x| x.created == ts) {
                         restored.push(found.clone());
                     }
@@ -524,7 +523,7 @@ fn waypoints(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandR
                 args.require_exactly(2)?;
                 args.optional_string();
                 let w = args.string("a timestamp")?;
-                let ts: u64 = w.parse().map_err(|_| CommandError::new(format!("Expected a valid number, but got \"{w}\".")))?;
+                let ts: u64 = w.parse().map_err(|_| args.invalid_type("Long"))?;
                 chosen = found.iter().find(|x| x.created == ts).cloned();
                 if chosen.is_none() {
                     return Err(CommandError::new("Timestamp was specified but no waypoint was found"));

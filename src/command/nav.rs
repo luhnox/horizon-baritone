@@ -219,9 +219,8 @@ fn goto(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
         return Ok(());
     }
     args.require_max(1)?;
-    let word = args.rest().into_iter().next().ok_or_else(|| CommandError::new("Not enough arguments (expected at least 1)"))?;
-    let bom = super::baritone_command::block_optional_meta(b, game, &word)?;
-    while args.optional_string().is_some() {}
+    let word = args.string("a block")?;
+    let bom = super::baritone_command::block_optional_meta(b, game, args, &word)?;
     let Baritone { core, procs, .. } = b;
     procs.get_to_block.get_to_block(core, game, bom);
     Ok(())

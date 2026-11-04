@@ -148,10 +148,9 @@ fn mine(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
     let quantity = args.try_int().unwrap_or(0);
     args.require_min(1)?;
     let mut boms = Vec::new();
-    for word in args.rest() {
-        boms.push(super::baritone_command::block_optional_meta(b, game, &word)?);
+    while let Some(word) = args.optional_string() {
+        boms.push(super::baritone_command::block_optional_meta(b, game, args, &word)?);
     }
-    while args.optional_string().is_some() {}
     b.core.say(game, &format!("Mining [{}]", boms.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")));
     let Baritone { core, procs, .. } = b;
     procs.mine.mine(core, game, quantity, Some(super::baritone_bom::BlockOptionalMetaLookup::new(boms)));
@@ -164,7 +163,7 @@ fn pickup(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
     while let Some(w) = args.optional_string() {
         let full = if w.contains(':') { w.to_ascii_lowercase() } else { format!("minecraft:{}", w.to_ascii_lowercase()) };
         if game.res.items().get(&full).is_none() {
-            return Err(CommandError::new(format!("Expected a valid item, but got \"{w}\".")));
+            return Err(args.invalid_datatype("ItemById"));
         }
         if !items.contains(&full) {
             items.push(full);
@@ -209,21 +208,19 @@ fn follow(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
     here(game)?;
     args.require_min(1)?;
     if args.has_exactly(1) {
-        let group = args.one_of(&["entities", "players"], "a group (entities or players)")?;
+        let group = args.one_of(&["entities", "players"], "FollowGroup")?;
         b.procs.follow.follow(if group == "entities" { Filter::Entities } else { Filter::Players });
         b.core.say(game, &format!("Following all {group}"));
         return Ok(());
     }
     args.require_min(2)?;
-    let list = args.one_of(&["entity", "player"], "entity or player")?;
-    let words = args.rest();
-    while args.optional_string().is_some() {}
+    let list = args.one_of(&["entity", "player"], "FollowList")?;
     if list == "entity" {
         let mut kinds = Vec::new();
-        for w in &words {
+        while let Some(w) = args.optional_string() {
             let id = if w.contains(':') { w.to_ascii_lowercase() } else { format!("minecraft:{}", w.to_ascii_lowercase()) };
             if !game.res.mob_types().contains_key(&id) {
-                return Err(CommandError::new(format!("Expected a valid entity type, but got \"{w}\".")));
+                return Err(args.invalid_datatype("EntityClassById"));
             }
             kinds.push(id);
         }
@@ -234,6 +231,8 @@ fn follow(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
         b.procs.follow.follow(Filter::Kinds(kinds));
     } else {
         // Players, by name: the ones in range now.
+        let words = args.rest();
+        while args.optional_string().is_some() {}
         let here_players: Vec<String> = targets(game).into_iter().filter(|t| t.kind == "minecraft:player").filter_map(|t| t.name).collect();
         let named: Vec<String> = words.iter().filter(|w| here_players.iter().any(|p| p.eq_ignore_ascii_case(w))).cloned().collect();
         if named.is_empty() {
@@ -256,9 +255,10 @@ fn explore(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandRes
     }
     let at = feet(game)?;
     let (x, z) = if args.has_any() {
-        let (wx, wz) = (args.string("x")?, args.string("z")?);
-        let bad = |w: &str| CommandError::new(format!("Expected a valid coordinate, but got \"{w}\"."));
-        (relative(&wx, at[0]).ok_or_else(|| bad(&wx))?, relative(&wz, at[2]).ok_or_else(|| bad(&wz))?)
+        let wx = args.string("x")?;
+        let x = relative(&wx, at[0]).ok_or_else(|| args.invalid_datatype("RelativeGoalXZ"))?;
+        let wz = args.string("z")?;
+        (x, relative(&wz, at[2]).ok_or_else(|| args.invalid_datatype("RelativeGoalXZ"))?)
     } else {
         (at[0], at[2])
     };
@@ -276,7 +276,7 @@ fn explore_filter(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> Com
         if word.eq_ignore_ascii_case("invert") {
             invert = true;
         } else {
-            return Err(CommandError::new("Expected either \"invert\" or nothing"));
+            return Err(args.invalid_type("either \"invert\" or nothing"));
         }
     }
     let chunks = read_filter(&resolve_file(game, &file)).map_err(CommandError)?;
@@ -303,11 +303,10 @@ fn find(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
     args.require_min(1)?;
     let at = feet(game)?;
     let mut found = Vec::new();
-    for w in args.rest() {
-        let name = block_word(b, game, &w)?;
+    while let Some(w) = args.optional_string() {
+        let name = block_word(b, game, args, "BlockById", &w)?;
         found.extend(b.core.cached_locations_of(name.trim_start_matches("minecraft:"), usize::MAX, at, 4));
     }
-    while args.optional_string().is_some() {}
     if found.is_empty() {
         b.core.say(game, "No positions known, are you sure the blocks are cached?");
         return Ok(());
