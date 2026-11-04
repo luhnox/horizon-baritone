@@ -169,7 +169,7 @@ fn slider(batch: &mut HudBatch, atlas: &HudAtlas, t: Rect, steps: usize, at: Opt
         let x = bar[0] + bar[2] * i as f32 / (steps - 1) as f32;
         fill(batch, atlas, [x.floor(), bar[1], line, bar[3]], c(EDGE));
     }
-    let (kw, kh) = (8.0 * f, 14.0 * f);
+    let (kw, kh) = (9.0 * f, 11.0 * f);
     let knob = [(bar[0] + bar[2] * pos - kw / 2.0).round().max(t[0]), t[1] + t[3] / 2.0 - kh / 2.0, kw, kh];
     bevel(batch, atlas, knob, if hover { BUTTON_HOVER } else { BUTTON }, BUTTON_LIGHT, BUTTON_DARK, if hover { WHITE } else { EDGE }, line);
 }

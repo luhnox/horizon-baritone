@@ -396,6 +396,8 @@ pub const COUNT_H: f32 = 14.0;
 pub const TAB_H: f32 = 16.0;
 pub const TAB_PITCH: f32 = 19.0;
 pub const CONTROL_H: f32 = 14.0;
+/// The switch is two squares side by side, as tall as the reference's: 30 by 16.
+pub const SWITCH_H: f32 = 16.0;
 
 pub struct Layout {
     /// GUI pixels for each pixel of the 480 by 270 design.
@@ -471,7 +473,8 @@ pub fn at_right(l: &Layout, row: Rect, w: f32) -> Rect {
 }
 
 pub fn switch(l: &Layout, row: Rect) -> Rect {
-    at_right(l, row, 30.0)
+    let f = l.scale;
+    [row[0] + row[2] - 14.0 * f - 30.0 * f, row[1] + (row[3] - SWITCH_H * f) / 2.0, 30.0 * f, SWITCH_H * f]
 }
 
 pub fn open_button(l: &Layout, row: Rect) -> Rect {
