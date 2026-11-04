@@ -1,8 +1,8 @@
 {
   "game": "26.3",
-  "horizon": "ba6344a59cb9e755b730dcf02285fc0d33b97d3c",
+  "horizon": "3fb4c3138e0c5d8fdd2fdb555cf31368e8897497",
   "id": "baritone",
   "mixins": "0d6b103c70633d8fd9443d8d0acd3aadaacedb06",
   "schema": 1,
-  "version": "1.1.38"
+  "version": "1.1.39"
 }

@@ -16,7 +16,7 @@ world, collision and input code.
 > flowers, crops, dirt) walk the surface looking for it instead of digging down to the strip-mining height, which is where the Java goes
 > whatever the block is. Ores, ancient debris, the deepslate layer and the like still branch underground as in the Java.
 
-Pinned to Horizon commit `ba6344a59cb9e755b730dcf02285fc0d33b97d3c`. Version 1.1.30 and older are pinned to `142388e` (Nightly 2026-11-01). The mod reads the
+Pinned to Horizon commit `3fb4c3138e0c5d8fdd2fdb555cf31368e8897497` (Nightly 2026-11-04), the same one SeedCrackerX is pinned to, so the two build together. Versions 1.1.31 to 1.1.38 are pinned to `ba6344a` (Nightly 2026-10-30) and 1.1.30 and older to `142388e`. The mod reads the
 game's private state, so a later Nightly may need it ported.
 
 ## Using it

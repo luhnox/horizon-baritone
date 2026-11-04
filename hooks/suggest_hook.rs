@@ -25,7 +25,7 @@ fn baritone_suggest(screen: &mut ChatScreen, m: &Measure) -> std::ops::ControlFl
     screen.usage_width = 0;
     screen.usage_position = 0;
     if screen.allow_suggestions && screen.auto_suggestions {
-        screen.show_suggestions(m);
+        screen.show_suggestions(m, false);
     }
     std::ops::ControlFlow::Break(())
 }

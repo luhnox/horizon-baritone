@@ -1,12 +1,12 @@
 [mod]
 id = "baritone"
-version = "1.1.38"
+version = "1.1.39"
 priority = 100
 
 # The commit this was written against: the Horizon the instance plays. It uses the native hook
 # points (NATIVE_HOOKS_API 1) and reads the game's world, so it names the commit it needs.
 [compatibility]
-horizon_revision = "ba6344a59cb9e755b730dcf02285fc0d33b97d3c"
+horizon_revision = "3fb4c3138e0c5d8fdd2fdb555cf31368e8897497"
 
 [[module]]
 id = "mod_utils"
@@ -403,12 +403,11 @@ source = "src/game/unload_stash.rs"
 [[injection]]
 id = "unload"
 kind = "HEAD"
-target = "horizon_client_render::streaming::Streaming::forget"
+target = "horizon_client_render::streaming::Streaming::forget_columns"
 helper = "hooks/unload.rs"
 bindings = [
   { name = "world", ty = "&World", value = "&*world" },
-  { name = "x", ty = "i32", value = "x" },
-  { name = "z", ty = "i32", value = "z" },
+  { name = "gone", ty = "&FxHashSet<(i32, i32)>", value = "gone" },
 ]
 
 [[module]]
@@ -614,7 +613,7 @@ bindings = [
 id = "lines"
 kind = "HEAD"
 cancellable = true
-target = "horizon_client::gizmos::camera_relative"
+target = "horizon_client_lib::gizmos::camera_relative"
 helper = "hooks/lines.rs"
 bindings = [
   { name = "lines", ty = "&[crate::gizmos::Line]", value = "lines" },

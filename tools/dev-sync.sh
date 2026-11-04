@@ -6,8 +6,8 @@ set -e
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 : "${HORIZON_WORK:?set HORIZON_WORK to a scratch folder}"
 : "${HORIZON_LAUNCHER:?set HORIZON_LAUNCHER to the horizon-launcher data folder}"
-# The Horizon commit the bundle pins (horizon-mixin.toml); HORIZON_REV tries another.
-REV=${HORIZON_REV:-ba6344a59cb9e755b730dcf02285fc0d33b97d3c}
+# The Horizon commit the bundle pins (horizon-mixin.toml); HORIZON_REV tries another, and HORIZON_SRC names the folder that holds its source.
+REV=${HORIZON_REV:-3fb4c3138e0c5d8fdd2fdb555cf31368e8897497}
 D="$HORIZON_WORK/mods/baritone/mixins/baritone"
 rm -rf "$D"; mkdir -p "$D"
 cp "$REPO/horizon-mixin.toml" "$D/"
@@ -15,7 +15,7 @@ cp -r "$REPO/src" "$REPO/hooks" "$D/"
 cd "$HORIZON_WORK"
 rm -rf stage-new
 "$(ls "$HORIZON_LAUNCHER"/native/tools/*/bin/horizon-mixins.exe | head -1)" apply \
-  --workspace "$HORIZON_LAUNCHER/native/source/$REV" --mods mods/baritone/mixins --out stage-new
+  --workspace "${HORIZON_SRC:-$HORIZON_LAUNCHER/native/source/$REV}" --mods mods/baritone/mixins --out stage-new
 python - <<'PY'
 import filecmp, os, shutil
 src, dst = 'stage-new', 'stage'
