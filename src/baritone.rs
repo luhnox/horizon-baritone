@@ -544,7 +544,7 @@ impl Baritone {
         }
         list.push(name.clone());
         let _ = self.core.ui.stage(&self.core.settings, THROWAWAY, &list.join(","));
-        self.core.ui.note = Some((format!("{name} added. Save Changes to keep it."), false));
+        self.core.ui.note = Some((format!("{name} added."), false));
     }
 
     /// A key on Baritone's page: true when a text field took it (Escape then does not leave the page).

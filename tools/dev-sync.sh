@@ -7,10 +7,12 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 : "${HORIZON_WORK:?set HORIZON_WORK to a scratch folder}"
 : "${HORIZON_LAUNCHER:?set HORIZON_LAUNCHER to the horizon-launcher data folder}"
 # The Horizon commit the bundle pins (horizon-mixin.toml); HORIZON_REV tries another, and HORIZON_SRC names the folder that holds its source.
-REV=${HORIZON_REV:-3fb4c3138e0c5d8fdd2fdb555cf31368e8897497}
+REV=${HORIZON_REV:-6475f62f3c834b7489e1816bf47f47ea5eb2b879}
 D="$HORIZON_WORK/mods/baritone/mixins/baritone"
 rm -rf "$D"; mkdir -p "$D"
 cp "$REPO/horizon-mixin.toml" "$D/"
+# Another commit than the one the toml pins: the copy that is applied says so.
+sed -i "s/horizon_revision = \"[0-9a-f]\{40\}\"/horizon_revision = \"$REV\"/" "$D/horizon-mixin.toml"
 cp -r "$REPO/src" "$REPO/hooks" "$D/"
 cd "$HORIZON_WORK"
 rm -rf stage-new

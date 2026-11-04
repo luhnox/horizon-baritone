@@ -379,6 +379,7 @@ pub fn draw(b: &mut Baritone, game: &Game<'_>, batch: &mut HudBatch) {
                         text_field(batch, atlas, field, &state.block, "Block name", state.focus == Some(Field::Block), 6.0 * f, f, t * 0.9);
                         let add = screen::add_button(&l, r);
                         button(batch, atlas, add, "Add", hover(add) && !dropdown_open, true, f, t * 0.9);
+                        widgets::record("Add", add, true);
                     }
                     Control::Link(_) => {
                         let open = screen::open_button(&l, r);

@@ -6,7 +6,7 @@ priority = 100
 # The commit this was written against: the Horizon the instance plays. It uses the native hook
 # points (NATIVE_HOOKS_API 1) and reads the game's world, so it names the commit it needs.
 [compatibility]
-horizon_revision = "3fb4c3138e0c5d8fdd2fdb555cf31368e8897497"
+horizon_revision = "6475f62f3c834b7489e1816bf47f47ea5eb2b879"
 
 [[module]]
 id = "mod_utils"
