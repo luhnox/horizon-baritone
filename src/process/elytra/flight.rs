@@ -161,6 +161,7 @@ impl TickableAim {
         Self { processor, prev, settings }
     }
 
+    #[allow(dead_code)]
     pub fn advance(&mut self, ticks: i32) {
         self.processor.advance(ticks, &self.settings);
     }

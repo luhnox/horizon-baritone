@@ -1,7 +1,7 @@
 // baritone.process.BuilderProcess, the part that needs no game: whether a block is the one the schematic wants
 // (`valid`, `sameBlockstate`), the schematic as the builder reads it (ISchematic with block states), the layers
 // wrapper, and BuilderCalculationContext's costs. The process itself is in build.rs.
-use super::baritone_block_state::{BlockState, Class, FluidKind};
+use super::baritone_block_state::{BlockState, Class};
 use super::baritone_calculation_context::{CalculationContext, CostHooks};
 use super::baritone_costs::COST_INF;
 use super::baritone_settings::Settings;
@@ -225,14 +225,10 @@ impl ISchematic for LayeredSchematic {
     }
 }
 
-/// Whether a state is a liquid block that is not a waterlogged one: `state.getBlock() instanceof LiquidBlock`.
-pub fn is_pure_liquid(state: &BlockState) -> bool {
-    state.is(Class::Liquid) || (state.fluid != FluidKind::None && state.is_air())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::baritone_block_state::FluidKind;
     use super::super::baritone_block_state::parse_props;
     use std::sync::Arc;
 

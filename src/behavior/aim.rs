@@ -105,6 +105,7 @@ impl AimProcessor {
         actual
     }
 
+    #[allow(dead_code)]
     pub fn advance(&mut self, ticks: i32, s: &AimSettings) {
         for _ in 0..ticks {
             self.tick(s);

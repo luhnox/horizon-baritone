@@ -131,6 +131,7 @@ impl Chunk {
     }
 
     /// The chunk's 12288 bytes in the native layout (little endian words), for hashing in tests.
+    #[allow(dead_code)]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = vec![0u8; SECTIONS * SECTION_LONGS * 8];
         for (i, section) in self.sections.iter().enumerate() {

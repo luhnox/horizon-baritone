@@ -15,6 +15,8 @@ enum State {
 }
 
 pub struct CustomGoalProcess {
+    /// A goal set since the last tick, for the flight in progress (`setGoal` calls `ElytraProcess.pathTo`).
+    pub elytra_update: Option<Option<GoalRef>>,
     goal: Option<GoalRef>,
     /// The most recent goal. Not invalidated upon onLostControl.
     most_recent_goal: Option<GoalRef>,
@@ -23,7 +25,7 @@ pub struct CustomGoalProcess {
 
 impl CustomGoalProcess {
     pub fn new() -> Self {
-        Self { goal: None, most_recent_goal: None, state: State::None }
+        Self { elytra_update: None, goal: None, most_recent_goal: None, state: State::None }
     }
 
     pub fn goal(&self) -> Option<&GoalRef> {
@@ -37,8 +39,8 @@ impl CustomGoalProcess {
     /// `setGoal`.
     pub fn set_goal_option(&mut self, goal: Option<GoalRef>) {
         self.goal = goal.clone();
-        self.most_recent_goal = goal;
-        // The elytra process is told of the new goal by the command that sets it.
+        self.most_recent_goal = goal.clone();
+        self.elytra_update = Some(goal);
         if self.state == State::None {
             self.state = State::GoalSet;
         }

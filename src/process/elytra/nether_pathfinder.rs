@@ -66,7 +66,9 @@ pub struct NetherPathfinder {
     cancel_flag: AtomicBool,
     generator: ChunkGeneratorHell,
     baritone_cache: Option<Arc<dyn RegionSource>>,
+    #[allow(dead_code)]
     seed: i64,
+    #[allow(dead_code)]
     dimension: Dimension,
     pub max_height: i32,
     /// The world y that the octrees start at, which the region files' heights are shifted by.
@@ -99,10 +101,12 @@ impl NetherPathfinder {
         self
     }
 
+    #[allow(dead_code)]
     pub fn seed(&self) -> i64 {
         self.seed
     }
 
+    #[allow(dead_code)]
     pub fn dimension(&self) -> Dimension {
         self.dimension
     }
@@ -167,6 +171,7 @@ impl NetherPathfinder {
     }
 
     /// How many chunks the table holds.
+    #[allow(dead_code)]
     pub fn chunk_count(&self) -> usize {
         self.chunks.lock().expect("chunk table").len()
     }
@@ -210,6 +215,7 @@ impl NetherPathfinder {
         self.cancel_flag.load(Ordering::SeqCst)
     }
 
+    #[allow(dead_code)]
     pub fn clear_cancelled(&self) -> bool {
         self.cancel_flag.swap(false, Ordering::SeqCst)
     }

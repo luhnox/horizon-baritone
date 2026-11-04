@@ -3,6 +3,7 @@
 // when there is none, plans the next segment when the current one is nearly over, and cuts a path off
 // where it should be. The Java runs the search on another thread; here it runs in slices of time each
 // tick (`SEARCH_SLICE`), with the Java's timeouts counted in ticks.
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::{Duration, Instant};
 use super::baritone_astar::{AStarPathFinder, Status, COEFFICIENTS};
 use super::baritone_avoidance::Avoidance;
@@ -94,6 +95,8 @@ struct Search {
 }
 
 pub struct PathingBehavior {
+    /// `logDirect`: lines to say whatever chatDebug is, for `Core::path_tick`.
+    pub direct: Vec<String>,
     /// Set when a path ended in the goal; `Core::path_tick` takes it, to leave the world when disconnectOnArrival says so.
     pub arrived_at_goal: bool,
     pub current: Option<PathExecutor>,
@@ -125,6 +128,7 @@ impl Default for PathingBehavior {
 impl PathingBehavior {
     pub fn new() -> Self {
         Self {
+            direct: Vec::new(),
             arrived_at_goal: false,
             current: None,
             next: None,
@@ -188,6 +192,7 @@ impl PathingBehavior {
         self.in_progress.as_ref().map(|s| (s.finder.best_so_far(0), s.finder.path_to_most_recent_node_considered()))
     }
 
+    #[allow(dead_code)]
     pub fn in_progress_start(&self) -> Option<Pos> {
         self.in_progress.as_ref().map(|s| s.start)
     }
@@ -366,6 +371,7 @@ impl PathingBehavior {
     }
 
     /// One whole tick with no control manager in between (the tests).
+    #[allow(dead_code)]
     pub fn on_tick(&mut self, ctx: &dyn PlayerContext, settings: &Settings, tools: &dyn ToolSet, ticks: u64) {
         self.begin_tick(ctx, settings, tools);
         self.run_tick(ctx, settings, tools, ticks);
@@ -565,6 +571,7 @@ impl PathingBehavior {
             if let Some(pos) = goal.render_pos() {
                 if !ctx.bsi().world_contains_loaded_chunk(pos[0], pos[2]) {
                     transformed = rc(GoalXZ(pos[0], pos[2]));
+                    self.debug(format!("Simplifying {} to GoalXZ due to distance", goal.label()));
                 }
             }
         }
@@ -582,6 +589,7 @@ impl PathingBehavior {
         for avoid in Avoidance::create(settings, &|| ctx.mobs_to_avoid(), &|| ctx.mob_spawners_near()) {
             avoid.apply_spherical(&mut favoring);
         }
+        self.debug(format!("Favoring size: {}", favoring.len()));
         let feet = ctx.player_feet();
         let mut real_start = start;
         let sub = [feet[0] - start[0], feet[1] - start[1], feet[2] - start[2]];
@@ -602,18 +610,25 @@ impl PathingBehavior {
         let calc = &hooked;
         calc.bsi.claim_cache(search.block_cache.clone());
         let begun = Instant::now();
-        let status = if settings.flag("slowPath") {
-            // slowPath sleeps slowPathTimeDelayMS before each node, which leaves a tick room for this many.
-            search.finder.run(calc, (50 / settings.int("slowPathTimeDelayMS").max(1) as usize).max(1))
-        } else {
+        let ran = catch_unwind(AssertUnwindSafe(|| {
+            if settings.flag("slowPath") {
+                // slowPath sleeps slowPathTimeDelayMS before each node, which leaves a tick room for this many.
+                return search.finder.run(calc, (50 / settings.int("slowPathTimeDelayMS").max(1) as usize).max(1));
+            }
             loop {
                 let status = search.finder.run(calc, NODES_BETWEEN_CHECKS);
                 if !matches!(status, Status::Running) || begun.elapsed() >= SEARCH_SLICE {
                     break status;
                 }
             }
-        };
+        }));
         calc.bsi.release_cache();
+        // AbstractNodeCostSearch.calculate: an exception ends this search, and only this search.
+        let Ok(status) = ran else {
+            self.in_progress = None;
+            self.direct.push("Pathing exception: the search stopped on an error, which is in the game's log".to_owned());
+            return;
+        };
         let elapsed = ticks.saturating_sub(search.started_tick);
         let timed_out = elapsed >= search.failure_timeout_ticks || (!search.finder.failing && elapsed >= search.primary_timeout_ticks);
         let took = format!("Took {}ms, {} movements considered", search.started_at.elapsed().as_millis(), search.finder.num_movements_considered);
@@ -652,7 +667,10 @@ impl PathingBehavior {
     /// AbstractNodeCostSearch.calculate's tail, then PathingBehavior's handling of the result.
     fn finish_search(&mut self, ctx: &dyn PlayerContext, settings: &Settings, calc: &CalculationContext, search: Search, path: Option<Path>) {
         let processed = path.map(|p| {
-            let p = p.post_process(calc);
+            let mut p = p.post_process(calc);
+            if let Some(note) = p.note.take() {
+                self.debug(note);
+            }
             let previous = p.length();
             let p = p.cutoff_at_loaded_chunks(settings.flag("cutoffAtLoadBoundary"), &|x, z| calc.bsi.world_contains_loaded_chunk(x, z));
             if p.length() < previous {

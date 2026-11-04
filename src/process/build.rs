@@ -237,6 +237,7 @@ impl BuilderProcess {
         self.paused = false;
     }
 
+    #[allow(dead_code)]
     pub fn pause(&mut self) {
         self.paused = true;
     }
@@ -246,6 +247,7 @@ impl BuilderProcess {
     }
 
     /// The positions that are not yet as the schematic wants, for drawing.
+    #[allow(dead_code)]
     pub fn incorrect(&self) -> impl Iterator<Item = Pos> + '_ {
         self.incorrect_positions.iter().flatten().copied()
     }

@@ -24,7 +24,9 @@ pub enum MovementStatus {
     Running,
     Success,
     Unreachable,
+    #[allow(dead_code)]
     Failed,
+    #[allow(dead_code)]
     Canceled,
 }
 

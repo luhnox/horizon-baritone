@@ -65,6 +65,7 @@ pub fn move_towards_without_rotation_yaw(env: &Env, state: &mut MovementState, i
     }
 }
 
+#[allow(dead_code)]
 pub fn move_towards_without_rotation(env: &Env, state: &mut MovementState, dest: Pos) {
     let ideal_yaw = calc_rotation_from_vec3d(env.ctx.player_head(), block_pos_center(dest), env.ctx.player_rotations()).yaw;
     move_towards_without_rotation_yaw(env, state, ideal_yaw);
@@ -168,6 +169,7 @@ pub fn attempt_to_place_a_block(env: &Env, state: &mut MovementState, place_at: 
         let against1 = [place_at[0] + dx, place_at[1] + dy, place_at[2] + dz];
         if mh::can_place_against(env.calc, against1[0], against1[1], against1[2]) {
             if !ctx.select_throwaway_for_location(false, place_at[0], place_at[1], place_at[2]) {
+                ctx.log_debug("bb pls get me some blocks. dirt, netherrack, cobble");
                 state.set_status(MovementStatus::Unreachable);
                 return PlaceResult::NoOption;
             }
@@ -621,6 +623,7 @@ impl Movement {
         let is_the_bridge_block_there = walk_on(env, place) || ladder || mh::can_use_frost_walker(env.calc, &block_at(env, place));
         let feet = ctx.player_feet();
         if feet[1] != dest[1] && !ladder {
+            ctx.log_debug("Wrong Y coordinate");
             if feet[1] < dest[1] {
                 state.set_input(Input::Jump, true);
             }
@@ -1197,10 +1200,12 @@ impl Movement {
     }
 
     /// The cost of this movement right now (`recalculateCost`), for the executor.
+    #[allow(dead_code)]
     pub fn current_cost(&mut self, calc: &CalculationContext) -> f64 {
         self.recalculate_cost(calc)
     }
 
+    #[allow(dead_code)]
     pub fn is_impossible(cost: f64) -> bool {
         cost >= COST_INF
     }

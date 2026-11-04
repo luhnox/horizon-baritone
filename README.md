@@ -18,8 +18,8 @@ game's private state, so a later Nightly may need it ported.
 
 Commands are typed in chat with Baritone's prefix, `#`, and never reach the server. `#help` lists them
 (click a line for its help), `#baritone` is `#set modified`, `#set list` lists the settings, and TAB
-completes commands, settings, block names and waypoints. Baritone keeps going with the chat or a menu
-open. It is off on multiplayer servers until `#set allowOnServers true`: most servers ban automation.
+completes commands, settings, block names and properties, files, players and waypoints. Baritone keeps going with the chat or a menu
+open. It works on multiplayer servers as the Java does, and most servers ban automation: that choice is yours.
 
 The settings you changed are kept in `horizon-mods/.horizon-mod-data/baritone/settings.txt`, one `name value`
 per line as in the Java's `baritone/settings.txt`. Edit it by hand and `#set load` reads it back.
@@ -60,6 +60,8 @@ tools/                  pack.py (builds the .hnmod), dev-sync.sh (applies it to 
 dist/                   where pack.py writes baritone.hnmod (not tracked; releases carry it)
 PARITY.md               the class-by-class comparison with Baritone 1.21.4
 ```
+
+`#[allow(dead_code)]` marks what the Java's API has and nothing in this mod calls, kept so that the API stays whole.
 
 Inside the game every file of `src/` becomes a module of `game.rs` named `baritone_<file>` (see
 `horizon-mixin.toml`), so `use super::baritone_goals::...` reads the same in the game and in the test

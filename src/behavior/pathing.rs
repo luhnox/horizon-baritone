@@ -56,7 +56,11 @@ impl Core {
         let pathing = self.pathing.is_pathing();
         self.inventory.tick(game, &self.settings, &self.throwaway, pathing, &tools);
         let lines = self.inventory.take_debug();
-        if self.settings.flag("chatDebug") { lines } else { Vec::new() }
+        let mut said = std::mem::take(&mut self.pathing.direct);
+        if self.settings.flag("chatDebug") {
+            said.extend(lines);
+        }
+        said
     }
 
     /// WorldProvider and the chunk packer, once a tick: follow the world and dimension, queue the chunks that
@@ -139,6 +143,11 @@ impl Core {
     }
 
     /// PathingBehavior.onTick, from the first half to the last, around what the processes asked for.
+    /// `ctx.worldData().getCachedWorld().getLocationsOf`.
+    pub fn cached_locations_of(&mut self, block: &str, maximum: usize, center: Pos, max_region_distance_sq: i32) -> Vec<Pos> {
+        self.world_data.current.as_mut().map_or_else(Vec::new, |data| data.cache.get_locations_of(block, maximum, center[0], center[2], max_region_distance_sq))
+    }
+
     pub fn path_tick(&mut self, game: &mut Game<'_>, command: Option<&PathingCommand>, real_process_changed: bool) -> Vec<String> {
         let ticks = game.ticks;
         // LookBehavior.onTick: the noise of this game tick.

@@ -35,8 +35,6 @@ pub enum Class {
     Waterlily,
     EndPortal,
     Skull,
-    WeepingVines,
-    TwistingVines,
 }
 
 impl Class {
@@ -112,6 +110,7 @@ pub struct BlockState {
     pub fluid: FluidKind,
     /// `FluidState.getAmount`: 8 for a source, 1 to 7 flowing, 0 with no fluid.
     pub fluid_amount: u8,
+    #[allow(dead_code)]
     pub hardness: f32,
     /// `state.canBeReplaced()`.
     pub replaceable: bool,
@@ -166,6 +165,7 @@ impl BlockState {
     }
 
     /// `state == other` for the states the pathfinder compares: the same block and the same properties.
+    #[allow(dead_code)]
     pub fn same_as(&self, other: &BlockState) -> bool {
         self.name == other.name && self.props == other.props
     }

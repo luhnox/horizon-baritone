@@ -11,10 +11,11 @@ use super::baritone_cmd_meta as meta;
 use super::baritone_cmd_nav as nav;
 use super::baritone_cmd_work as work;
 use super::baritone_goals::{rc, GoalBlock, GoalRef, GoalXZ, GoalYLevel};
-use super::baritone_gworld::{on_server, player_pos};
+use super::baritone_gworld::player_pos;
 use super::baritone_settings as settings;
 use super::baritone_utils::Pos;
 use super::Game;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use horizon_client::text::{self, ClickEvent, Style, Text};
 
 /// The command a clickable chat line runs.
@@ -120,10 +121,7 @@ fn run_inner(b: &mut Baritone, game: &mut Game<'_>, line: &str) {
         return;
     };
     let Some(command) = find(&name) else {
-        b.core.say_text(
-            game,
-            Text::colored(format!("Unknown command: {name}. "), text::RED).append(clickable("[#help]", text::YELLOW, run_event("help"), Text::colored("Click for the list of commands", text::GRAY))),
-        );
+        b.core.say_red(game, &format!("Command not found: {name}"));
         return;
     };
     if !command.alias.is_empty() {
@@ -131,7 +129,12 @@ fn run_inner(b: &mut Baritone, game: &mut Game<'_>, line: &str) {
         return run_inner(b, game, target.trim());
     }
     let label = command.names[0];
-    if let Err(CommandError(why)) = (command.run)(b, game, &mut args) {
+    // CommandUnhandledException: a bug in a command costs the command, not the game.
+    let Ok(outcome) = catch_unwind(AssertUnwindSafe(|| (command.run)(b, game, &mut args))) else {
+        b.core.say_red(game, "An unhandled exception occurred. The error is in your game's log, please report this at https://github.com/luhnox/horizon-baritone/issues");
+        return;
+    };
+    if let Err(CommandError(why)) = outcome {
         let _ = label;
         if b.core.settings.flag("verboseCommandExceptions") {
             // The Java prints the stack of the exception a bad argument raised; there is no stack here, so the game's log gets the reason.
@@ -237,15 +240,6 @@ pub fn here(game: &Game<'_>) -> CommandResult<[f64; 3]> {
 /// The block the player's feet are in.
 pub fn feet(game: &Game<'_>) -> CommandResult<Pos> {
     super::baritone_gworld::player_feet(game).ok_or_else(|| CommandError::new("Not in a world."))
-}
-
-/// Whether something may start here: off on servers unless allowed (Horizon's own rule). What is running is not stopped: the process
-/// that became active last takes control, as in the Java.
-pub fn may_start(b: &Baritone, game: &Game<'_>) -> CommandResult {
-    if on_server(game) && !b.core.settings.flag("allowOnServers") {
-        return Err(CommandError::new("Baritone is off on servers. #set allowOnServers true turns it on, if the server allows it."));
-    }
-    Ok(())
 }
 
 /// One block name (ForBlockOptionalMeta): `stone`, `minecraft:stone`, or `oak_stairs[facing=north]`.

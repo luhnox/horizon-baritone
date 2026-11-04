@@ -16,6 +16,7 @@ impl Avoidance {
     }
 
     /// The coefficient at a position: the avoidance's inside its sphere, 1 outside.
+    #[allow(dead_code)]
     pub fn coefficient(&self, p: Pos) -> f64 {
         let d = [p[0] - self.center[0], p[1] - self.center[1], p[2] - self.center[2]];
         if d.iter().map(|v| v * v).sum::<i32>() <= self.radius * self.radius { self.coefficient } else { 1.0 }

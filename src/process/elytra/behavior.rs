@@ -59,6 +59,7 @@ pub struct PlayerSnapshot {
     pub rotation: Rotation,
     pub fall_flying: bool,
     pub in_lava: bool,
+    #[allow(dead_code)]
     pub on_ground: bool,
     pub bounding_box: Aabb,
     pub tick: u64,
@@ -412,6 +413,7 @@ impl ElytraBehavior {
         self.destination_result.take()
     }
 
+    #[allow(dead_code)]
     pub fn is_searching(&self) -> bool {
         self.running.is_some()
     }

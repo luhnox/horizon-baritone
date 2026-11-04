@@ -26,6 +26,7 @@ pub struct Def {
     pub name: &'static str,
     pub kind: Kind,
     pub default: &'static str,
+    #[allow(dead_code)]
     pub desc: &'static str,
 }
 
@@ -288,7 +289,6 @@ pub const DEFS: &[Def] = &[
     def!("elytraLongDistanceThreshold", Int, "500", "Minimum distance in blocks of an elytra trip before the pathfinder will try to fly above build limit"),
     def!("allowWalkOnMagmaBlocks", Bool, "false", "Sneak when magma blocks are under feet"),
     // Not Baritone's: most servers ban automation, so Baritone is off on them unless this is true.
-    def!("allowOnServers", Bool, "false", "Allow Baritone on multiplayer servers (Horizon)"),
 ];
 
 
@@ -615,7 +615,6 @@ pub const JAVA_TYPES: &[(&str, &str)] = &[
     ("elytraAllowAboveBuildLimit", "Boolean"),
     ("elytraLongDistanceThreshold", "Integer"),
     ("allowWalkOnMagmaBlocks", "Boolean"),
-    ("allowOnServers", "Boolean"),
 ];
 
 pub fn java_type(name: &str) -> &'static str {

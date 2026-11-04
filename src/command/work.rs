@@ -4,7 +4,7 @@
 use super::baritone::Baritone;
 use super::baritone_argument::{Args, CommandError, CommandResult};
 use super::baritone_cmd_build::resolve_file;
-use super::baritone_command::{may_start, block_word, clickable, dimension, feet, here, relative, run_event, Command, CLICK};
+use super::baritone_command::{block_word, clickable, dimension, feet, here, relative, run_event, Command, CLICK};
 use super::baritone_goals::Goal;
 use super::baritone_gworld::{bare, targets};
 use super::baritone_p_explore::read_filter;
@@ -12,7 +12,6 @@ use super::baritone_p_follow::Filter;
 use super::baritone_utils::pos_label;
 use super::Game;
 use horizon_client::text::{self, ClickEvent, Style, Text};
-use std::collections::HashSet;
 
 pub const COMMANDS: &[Command] = &[
     Command {
@@ -118,7 +117,8 @@ pub const COMMANDS: &[Command] = &[
         names: &["find"],
         short: "Find positions of a certain block",
         long: &[
-            "The find command searches through the loaded world and attempts to find the location of the block.",
+            "The find command searches through Baritone's cache and attempts to find the location of the block.",
+            "Tab completion will suggest only cached blocks and uncached blocks can not be found.",
             "",
             "Usage:",
             "> find <block> [...] - Try finding the listed blocks",
@@ -152,7 +152,6 @@ fn mine(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
         boms.push(super::baritone_command::block_optional_meta(b, game, &word)?);
     }
     while args.optional_string().is_some() {}
-    may_start(b, game)?;
     b.core.say(game, &format!("Mining [{}]", boms.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")));
     let Baritone { core, procs, .. } = b;
     procs.mine.mine(core, game, quantity, Some(super::baritone_bom::BlockOptionalMetaLookup::new(boms)));
@@ -171,7 +170,6 @@ fn pickup(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
             items.push(full);
         }
     }
-    may_start(b, game)?;
     if items.is_empty() {
         b.core.say(game, "Picking up all items");
         b.procs.follow.pickup(Vec::new());
@@ -202,7 +200,6 @@ fn farm(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
             _ => return Err(CommandError::new("Multiple waypoints were found")),
         };
     }
-    may_start(b, game)?;
     b.procs.farm.farm(range, origin);
     b.core.say(game, "Farming");
     Ok(())
@@ -213,7 +210,6 @@ fn follow(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
     args.require_min(1)?;
     if args.has_exactly(1) {
         let group = args.one_of(&["entities", "players"], "a group (entities or players)")?;
-        may_start(b, game)?;
         b.procs.follow.follow(if group == "entities" { Filter::Entities } else { Filter::Players });
         b.core.say(game, &format!("Following all {group}"));
         return Ok(());
@@ -231,7 +227,6 @@ fn follow(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
             }
             kinds.push(id);
         }
-        may_start(b, game)?;
         b.core.say(game, "Following these types of entities:");
         for k in &kinds {
             b.core.say(game, k);
@@ -244,7 +239,6 @@ fn follow(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
         if named.is_empty() {
             return Err(CommandError::new("No valid entities in range!"));
         }
-        may_start(b, game)?;
         b.core.say(game, "Following these entities:");
         for n in &named {
             b.core.say(game, n);
@@ -268,7 +262,6 @@ fn explore(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandRes
     } else {
         (at[0], at[2])
     };
-    may_start(b, game)?;
     b.procs.explore.explore(x, z);
     b.core.say(game, &format!("Exploring from {}", super::baritone_goals::GoalXZ(x, z).label()));
     Ok(())
@@ -312,12 +305,11 @@ fn find(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
     let mut found = Vec::new();
     for w in args.rest() {
         let name = block_word(b, game, &w)?;
-        let set: HashSet<String> = [name].into_iter().collect();
-        found.extend(b.core.cache.locations_of(game, &set, at, 160, Some((horizon_client::chunk::MIN_Y, 320)), 16));
+        found.extend(b.core.cached_locations_of(name.trim_start_matches("minecraft:"), usize::MAX, at, 4));
     }
     while args.optional_string().is_some() {}
     if found.is_empty() {
-        b.core.say(game, "No positions known, are you sure the blocks are in the loaded world?");
+        b.core.say(game, "No positions known, are you sure the blocks are cached?");
         return Ok(());
     }
     for p in found {
@@ -438,7 +430,6 @@ fn elytra(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
         }
         let goal = b.procs.goal.most_recent_goal().cloned().ok_or_else(|| CommandError::new("No goal has been set"))?;
         here(game)?;
-        may_start(b, game)?;
         let Baritone { core, procs, .. } = b;
         return procs.elytra.path_to(core, game, &goal).map_err(CommandError::new);
     }

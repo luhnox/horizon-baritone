@@ -346,10 +346,12 @@ impl AStarPathFinder {
         self.most_recent_considered.map(|n| Path::from_nodes(self.real_start, self.start, &self.nodes_chain(n), 0, self.goal.clone()))
     }
 
+    #[allow(dead_code)]
     pub fn open_set_size(&self) -> usize {
         self.open.size()
     }
 
+    #[allow(dead_code)]
     pub fn moves_considered(&self) -> usize {
         self.num_movements_considered
     }

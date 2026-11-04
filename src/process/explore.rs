@@ -77,6 +77,8 @@ pub struct ExploreProcess {
     exploration_origin: Option<Pos>,
     filter: Option<JsonFilter>,
     distance_completed: i32,
+    /// The goal of the last tick, for `displayName0`.
+    going_to: String,
 }
 
 /// The anonymous GoalXZ of `createGoal` that also keeps the height (`exploreMaintainY`).
@@ -110,7 +112,7 @@ fn create_goal(core: &Core, x: i32, z: i32) -> GoalRef {
 
 impl ExploreProcess {
     pub fn new() -> Self {
-        Self { exploration_origin: None, filter: None, distance_completed: 0 }
+        Self { exploration_origin: None, filter: None, distance_completed: 0, going_to: String::new() }
     }
 
     /// `explore(centerX, centerZ)`.
@@ -123,10 +125,6 @@ impl ExploreProcess {
     pub fn set_filter(&mut self, chunks: HashSet<(i32, i32)>, invert: bool) {
         let positions: Vec<(i32, i32)> = chunks.iter().copied().collect();
         self.filter = Some(JsonFilter { in_filter: chunks, positions, invert });
-    }
-
-    pub fn filter_len(&self) -> usize {
-        self.filter.as_ref().map_or(0, |f| f.positions.len())
     }
 
     /// The `EitherChunk` of the filter and the cache, or the cache alone.
@@ -231,7 +229,7 @@ impl Process for ExploreProcess {
 
     fn display(&self) -> String {
         match self.exploration_origin {
-            Some(o) => format!("Exploring around BlockPos{{x={}, y={}, z={}}}, distance completed {}", o[0], o[1], o[2], self.distance_completed),
+            Some(o) => format!("Exploring around BlockPos{{x={}, y={}, z={}}}, distance completed {}, currently going to {}", o[0], o[1], o[2], self.distance_completed, self.going_to),
             None => "Not exploring".into(),
         }
     }
@@ -265,7 +263,11 @@ impl Process for ExploreProcess {
         }
         match self.closest_uncached_chunks(core, origin) {
             None => PathingCommand::RequestPause, // awaiting region load from disk
-            Some(goals) => PathingCommand::ForceRevalidateGoalAndPath(rc(GoalComposite(goals))),
+            Some(goals) => {
+                let goal = rc(GoalComposite(goals));
+                self.going_to = goal.label();
+                PathingCommand::ForceRevalidateGoalAndPath(goal)
+            }
         }
     }
 

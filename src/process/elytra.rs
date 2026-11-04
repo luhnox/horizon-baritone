@@ -239,6 +239,7 @@ impl ElytraProcess {
     }
 
     /// `isLoaded`: there is no native library to load here.
+    #[allow(dead_code)]
     pub fn is_loaded(&self) -> bool {
         true
     }
@@ -252,6 +253,7 @@ impl ElytraProcess {
         self.behavior.as_ref().map(|b| b.destination)
     }
 
+    #[allow(dead_code)]
     pub fn path(&self) -> Vec<Pos> {
         self.behavior.as_ref().map_or_else(Vec::new, |b| b.path_manager.path().blocks().to_vec())
     }

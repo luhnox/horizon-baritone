@@ -742,7 +742,9 @@ impl PathExecutor {
             new_path.positions.drain(..cutoff_amt);
             new_path.movements.drain(..cutoff_amt);
             assert!(new_path.dest() == self.path.dest(), "Path has end {:?} instead of {:?} after trimming its start", new_path.dest(), self.path.dest());
+            let shorter = format!("Discarding earliest segment movements, length cut from {} to {}", self.path.length(), new_path.length());
             let mut ret = PathExecutor::new(new_path);
+            ret.debug(shorter);
             ret.path_position = self.path_position - cutoff_amt;
             ret.current_movement_original_cost_estimate = self.current_movement_original_cost_estimate;
             ret.cost_estimate_index = self.cost_estimate_index.map(|i| i.saturating_sub(cutoff_amt));

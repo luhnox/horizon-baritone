@@ -107,6 +107,7 @@ impl NetherPath {
         self.blocks.clone()
     }
 
+    #[allow(dead_code)]
     pub fn same_as(&self, other: &NetherPath) -> bool {
         Arc::ptr_eq(&self.blocks, &other.blocks)
     }

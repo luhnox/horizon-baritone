@@ -3,7 +3,7 @@
 // resume, paused and cancel. Names, aliases, descriptions and messages are Baritone 1.21.4's.
 use super::baritone::Baritone;
 use super::baritone_argument::{Args, CommandError, CommandResult};
-use super::baritone_command::{may_start, feet, relative_goal, Command};
+use super::baritone_command::{feet, relative_goal, Command};
 use super::baritone_goals::{rc, GoalAxis, GoalBlock, GoalInverted, GoalRef, GoalXZ};
 use super::baritone_gworld::is_air_at;
 use super::baritone_utils::{column_ahead, up};
@@ -214,7 +214,6 @@ fn goto(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
         args.require_max(3)?;
         let origin = feet(game)?;
         let goal = relative_goal(args, origin)?;
-        may_start(b, game)?;
         b.core.say(game, &format!("Going to: {}", goal.label()));
         b.procs.goal.set_goal_and_path(goal);
         return Ok(());
@@ -223,7 +222,6 @@ fn goto(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
     let word = args.rest().into_iter().next().ok_or_else(|| CommandError::new("Not enough arguments (expected at least 1)"))?;
     let bom = super::baritone_command::block_optional_meta(b, game, &word)?;
     while args.optional_string().is_some() {}
-    may_start(b, game)?;
     let Baritone { core, procs, .. } = b;
     procs.get_to_block.get_to_block(core, game, bom);
     Ok(())
@@ -253,7 +251,6 @@ fn path(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
         b.core.say(game, "No goal set");
         return Ok(());
     }
-    may_start(b, game)?;
     b.procs.goal.path();
     b.core.say(game, "Now pathing");
     Ok(())
@@ -300,7 +297,6 @@ fn come(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult
     args.require_max(0)?;
     // The camera is where the player's eyes are: the block they are in.
     let at = feet(game)?;
-    may_start(b, game)?;
     b.procs.goal.set_goal_and_path(rc(GoalBlock(at)));
     b.core.say(game, "Coming");
     Ok(())
@@ -328,7 +324,6 @@ fn invert(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
         Some(origin) => origin,
         None => rc(GoalInverted(goal)),
     };
-    may_start(b, game)?;
     b.core.say(game, &format!("Goal: {}", flipped.label()));
     b.procs.goal.set_goal_and_path(flipped);
     Ok(())
@@ -356,7 +351,6 @@ fn surface(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandRes
         let p = [player[0], y, player[2]];
         if !is_air_at(game, p) && y > player[1] {
             let goal: GoalRef = rc(GoalBlock(up(p, 1)));
-            may_start(b, game)?;
             b.core.say(game, &format!("Going to: {}", goal.label()));
             b.procs.goal.set_goal_and_path(goal);
             return Ok(());

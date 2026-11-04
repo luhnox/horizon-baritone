@@ -119,6 +119,7 @@ impl PathManager {
         }
     }
 
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.path = NetherPath::empty();
         self.complete_path = true;
@@ -140,6 +141,7 @@ impl PathManager {
         self.complete_path
     }
 
+    #[allow(dead_code)]
     pub fn is_recalculating(&self) -> bool {
         self.recalculating
     }

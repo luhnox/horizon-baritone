@@ -32,6 +32,7 @@ impl Rotation {
         Rotation::new(normalize_yaw(self.yaw), self.pitch)
     }
 
+    #[allow(dead_code)]
     pub fn normalize_and_clamp(self) -> Rotation {
         Rotation::new(normalize_yaw(self.yaw), clamp_pitch(self.pitch))
     }

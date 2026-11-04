@@ -39,6 +39,11 @@ impl InventoryBehavior {
         &mut self.pauser
     }
 
+    /// A `logDebug` line for the next `take_debug`.
+    pub fn log_debug(&mut self, line: &str) {
+        self.debug.push(line.to_owned());
+    }
+
     pub fn take_debug(&mut self) -> Vec<String> {
         std::mem::take(&mut self.debug)
     }

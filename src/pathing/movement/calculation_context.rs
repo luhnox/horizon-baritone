@@ -14,6 +14,7 @@ pub trait ToolSet {
 }
 
 /// A tool set that breaks everything at speed 1, for the tests and for a player with nothing.
+#[allow(dead_code)]
 pub struct BareHands;
 
 impl ToolSet for BareHands {

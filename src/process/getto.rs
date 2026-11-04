@@ -72,6 +72,9 @@ impl GetToBlockProcess {
             }
             break;
         }
+        if core.settings.flag("chatDebug") {
+            core.say(game, &format!("Blacklisting unreachable locations {new_blacklist:?}"));
+        }
         self.blacklist.extend(new_blacklist.iter().copied());
         !new_blacklist.is_empty()
     }

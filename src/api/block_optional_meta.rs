@@ -20,6 +20,7 @@ pub struct BlockOptionalMeta {
 
 impl BlockOptionalMeta {
     /// `new BlockOptionalMeta(Block)`.
+    #[allow(dead_code)]
     pub fn of_block(block: &str) -> Self {
         Self { block: Arc::from(block), properties: Vec::new(), description: "{}".into(), drops: HashSet::new() }
     }
@@ -91,6 +92,7 @@ impl BlockOptionalMetaLookup {
         &self.boms
     }
 
+    #[allow(dead_code)]
     pub fn blocks_mut(&mut self) -> &mut [BlockOptionalMeta] {
         &mut self.boms
     }
@@ -106,6 +108,7 @@ impl BlockOptionalMetaLookup {
     }
 
     /// `has(Block)`: by name alone.
+    #[allow(dead_code)]
     pub fn has_block(&self, name: &str) -> bool {
         self.boms.iter().any(|b| *b.block == *name)
     }

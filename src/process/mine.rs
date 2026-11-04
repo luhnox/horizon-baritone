@@ -95,19 +95,13 @@ impl MineProcess {
         }
     }
 
-    /// Never mine this block again (#blacklist): the nearest one known.
-    pub fn blacklist_nearest(&mut self, from: Pos) -> Option<Pos> {
-        let p = self.known_ore_locations.iter().copied().min_by_key(|t| dist_sq(*t, from))?;
-        self.blacklist.push(p);
-        self.known_ore_locations.retain(|t| *t != p);
-        Some(p)
-    }
-
     /// The ore it is after, nearest first, for drawing.
+    #[allow(dead_code)]
     pub fn targets(&self) -> &[Pos] {
         &self.known_ore_locations
     }
 
+    #[allow(dead_code)]
     pub fn filter(&self) -> Option<&BlockOptionalMetaLookup> {
         self.filter.as_ref()
     }
@@ -377,9 +371,9 @@ pub fn search_world(core: &mut Core, game: &mut Game<'_>, filter: &BlockOptional
     for bom in filter.blocks() {
         let bare = bom.block().trim_start_matches("minecraft:");
         if BLOCKS_TO_KEEP_TRACK_OF.contains(&bare) {
-            let names = std::iter::once(bom.block().to_owned()).collect();
+            // maxRegionDistanceSq 2 means adjacent directly or adjacent diagonally; nothing further than that.
             let cap = core.settings.int("maxCachedWorldScanCount").max(0) as usize;
-            locs.extend(core.cache.locations_of(game, &names, feet, 512, None, cap));
+            locs.extend(core.cached_locations_of(bare, cap, feet, 2));
         } else {
             untracked = true;
         }

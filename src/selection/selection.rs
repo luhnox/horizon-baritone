@@ -43,6 +43,7 @@ impl Selection {
         i64::from(s[0]) * i64::from(s[1]) * i64::from(s[2])
     }
 
+    #[allow(dead_code)]
     pub fn contains(&self, p: Pos) -> bool {
         let (lo, hi) = (self.min(), self.max());
         (0..3).all(|i| p[i] >= lo[i] && p[i] <= hi[i])
@@ -107,6 +108,7 @@ impl SelectionManager {
         self.selections.pop()
     }
 
+    #[allow(dead_code)]
     pub fn last(&self) -> Option<Selection> {
         self.selections.last().copied()
     }

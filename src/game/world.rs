@@ -23,12 +23,6 @@ pub fn is_air_at(game: &Game<'_>, p: Pos) -> bool {
     game.res.facts().is_air(game.world.block(p[0], p[1], p[2]))
 }
 
-/// Playing on someone else's server. A single-player world is a server of its own here (and so is a
-/// world opened to LAN), but not one the rules about automation are about.
-pub fn on_server(game: &Game<'_>) -> bool {
-    game.remote.as_ref().is_some_and(|r| r.session.address != "local")
-}
-
 pub fn loaded(game: &Game<'_>, p: Pos) -> bool {
     game.world.chunks.contains_key(&(p[0] >> 4, p[2] >> 4))
 }
@@ -138,59 +132,5 @@ impl WorldCache {
         ids
     }
 
-    /// The positions of blocks called `names` within `radius` blocks (horizontally) of `center` and
-    /// within `y_range`, nearest first, at most `max`.
-    pub fn locations_of(
-        &mut self,
-        game: &Game<'_>,
-        names: &HashSet<String>,
-        center: Pos,
-        radius: i32,
-        y_range: Option<(i32, i32)>,
-        max: usize,
-    ) -> Vec<Pos> {
-        let ids = self.state_ids(game, names);
-        if ids.is_empty() {
-            return Vec::new();
-        }
-        let (y_lo, y_hi) = y_range.unwrap_or((center[1] - 48, center[1] + 48));
-        let y_lo = y_lo.max(horizon_client::chunk::MIN_Y);
-        let mut found: Vec<(i64, Pos)> = Vec::new();
-        let (cx0, cx1) = ((center[0] - radius) >> 4, (center[0] + radius) >> 4);
-        let (cz0, cz1) = ((center[2] - radius) >> 4, (center[2] + radius) >> 4);
-        for cx in cx0..=cx1 {
-            for cz in cz0..=cz1 {
-                let Some(chunk) = game.world.chunks.get(&(cx, cz)) else {
-                    continue;
-                };
-                for (s, section) in chunk.sections.iter().enumerate() {
-                    let base = horizon_client::chunk::MIN_Y + s as i32 * 16;
-                    if base + 15 < y_lo || base > y_hi {
-                        continue;
-                    }
-                    if !section.blocks.maybe_has(|v| ids.contains(&v)) {
-                        continue;
-                    }
-                    for y in base.max(y_lo)..=(base + 15).min(y_hi) {
-                        for lz in 0..16 {
-                            for lx in 0..16 {
-                                let (x, z) = (cx * 16 + lx, cz * 16 + lz);
-                                if (x - center[0]).abs() > radius || (z - center[2]).abs() > radius {
-                                    continue;
-                                }
-                                if ids.contains(&chunk.get(lx, y, lz)) {
-                                    let d = (i64::from(x - center[0])).pow(2) + (i64::from(y - center[1])).pow(2) + (i64::from(z - center[2])).pow(2);
-                                    found.push((d, [x, y, z]));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        found.sort_unstable_by_key(|f| f.0);
-        found.truncate(max);
-        found.into_iter().map(|f| f.1).collect()
-    }
 }
 

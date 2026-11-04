@@ -107,4 +107,7 @@ pub trait PlayerContext {
     fn is_input_forced_down(&self, input: Input) -> bool;
     /// BlockBreakHelper.stopBreakingBlock.
     fn stop_breaking_block(&self);
+
+    /// `logDebug`, from a movement.
+    fn log_debug(&self, _line: &str) {}
 }

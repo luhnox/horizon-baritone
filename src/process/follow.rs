@@ -47,6 +47,7 @@ impl FollowProcess {
         self.follow(Filter::Items(items));
     }
 
+    #[allow(dead_code)]
     pub fn following(&self) -> &[[f64; 3]] {
         &self.cache
     }

@@ -2,7 +2,7 @@
 // messages are Baritone 1.21.4's (BuildCommand, LitematicaCommand, TunnelCommand, SelCommand).
 use super::baritone::{Baritone, ID};
 use super::baritone_argument::{Args, CommandError, CommandResult};
-use super::baritone_command::{may_start, feet, relative_pos, Command};
+use super::baritone_command::{feet, relative_pos, Command};
 use super::baritone_format as format;
 use super::baritone_goals::{rc, GoalStrictDirection};
 use super::baritone_schematic::{
@@ -143,7 +143,6 @@ fn build(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResul
         CommandError::new("Couldn't load the schematic. Either your schematic is corrupt or this is a bug.")
     })?;
     let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    may_start(b, game)?;
     let Baritone { core, procs, .. } = b;
     procs.build.build_file(core, game, name, schematic, build_origin);
     b.core.say(game, &format!("Successfully loaded schematic for building\nOrigin: {}", pos_label(build_origin)));
@@ -180,12 +179,10 @@ fn tunnel(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
             (0, -1) => ([at[0] - width / 2, at[1], at[2]], [at[0] + width / 2 + addition, at[1] + height, at[2] - depth]),
             _ => ([at[0] + width / 2 + addition, at[1], at[2]], [at[0] - width / 2, at[1] + height, at[2] + depth]),
         };
-        may_start(b, game)?;
         b.core.say(game, &format!("Creating a tunnel {} block(s) high, {} block(s) wide, and {depth} block(s) deep", height + 1, width + 1));
         let Baritone { core, procs, .. } = b;
         procs.build.clear_area(core, game, c1, c2);
     } else {
-        may_start(b, game)?;
         let goal = rc(GoalStrictDirection { origin: at, dx: step.0, dz: step.1 });
         let label = goal.label();
         b.procs.goal.set_goal_and_path(goal);
@@ -385,7 +382,6 @@ fn sel(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
             }
             let size = [hi[0] - origin[0] + 1, hi[1] - origin[1] + 1, hi[2] - origin[2] + 1];
             let composite = CompositeSchematic { size, parts, name: "Fill".into() };
-            may_start(b, game)?;
             let Baritone { core, procs, .. } = b;
             procs.build.build(core, game, "Fill".into(), Rc::new(composite), origin);
             b.core.say(game, "Filling now");
@@ -433,7 +429,6 @@ fn sel(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
             args.require_max(0)?;
             let clip = b.core.clipboard.clone().ok_or_else(|| CommandError::new("You need to copy a selection first"))?;
             let off = b.core.clipboard_offset;
-            may_start(b, game)?;
             let Baritone { core, procs, .. } = b;
             procs.build.build(core, game, "Paste".into(), clip, [pos[0] + off[0], pos[1] + off[1], pos[2] + off[2]]);
             b.core.say(game, "Building now");

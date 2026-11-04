@@ -42,10 +42,12 @@ impl NetherPathfinderContext {
         Ok(Self { npf: Arc::new(npf), min_y, max_height: height, seed })
     }
 
+    #[allow(dead_code)]
     pub fn pathfinder(&self) -> &Arc<NetherPathfinder> {
         &self.npf
     }
 
+    #[allow(dead_code)]
     pub fn min_y(&self) -> i32 {
         self.min_y
     }
@@ -124,6 +126,7 @@ impl NetherPathfinderContext {
     }
 
     /// The hit position of a ray, in world coordinates, if it hit.
+    #[allow(dead_code)]
     pub fn raytrace_hit(&self, start: [f64; 3], end: [f64; 3]) -> Option<[f64; 3]> {
         let shifted = |p: [f64; 3]| [p[0], p[1] - f64::from(self.min_y), p[2]];
         raytrace(&self.npf, shifted(start), shifted(end), CacheMiss::Solid).ok().flatten().map(|h| [h[0], h[1] + f64::from(self.min_y), h[2]])

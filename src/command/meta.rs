@@ -139,14 +139,14 @@ pub const COMMANDS: &[Command] = &[
         names: &["sethome"],
         short: "Sets your home waypoint",
         long: &[],
-        alias: "wp save home",
+        alias: "waypoints save home",
         run: alias_run,
     },
     Command {
         names: &["home"],
-        short: "Set goal to your home waypoint",
+        short: "Path to your home waypoint",
         long: &[],
-        alias: "wp goal home",
+        alias: "waypoints goto home",
         run: alias_run,
     },
 ];
@@ -278,7 +278,7 @@ fn set(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult 
         {
             b.core.say_red(game, "Warning: Chat commands will no longer work. If you want to revert this change, use prefix control (if enabled) or click the old value listed above.");
         } else if d.name == "prefixControl" && !s.flag("prefixControl") {
-            b.core.say_red(game, "Warning: Prefixed commands (like \"#set prefixControl true\") will no longer work. If you want to revert this change, use chat control (if enabled) or click the old value listed above.");
+            b.core.say_red(game, "Warning: Prefixed commands will no longer work. If you want to revert this change, use chat control (if enabled) or click the old value listed above.");
         }
     }
     b.core.save_settings(game);
@@ -577,7 +577,6 @@ fn waypoints(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandR
                     b.core.say(game, &format!("Goal: {name}"));
                 }
                 _ => {
-                    super::baritone_command::may_start(b, game)?;
                     let goal = rc(GoalBlock(w.pos));
                     let name = goal.label();
                     b.procs.goal.set_goal_and_path(goal);

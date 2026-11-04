@@ -63,6 +63,7 @@ pub struct Dimension {
 }
 
 impl Dimension {
+    #[allow(dead_code)]
     pub fn overworld() -> Self {
         Self { min_y: -64, height: 384, logical_height: 384, has_ceiling: false, natural: true, ultra_warm: false, end: false }
     }
@@ -388,6 +389,7 @@ impl CachedRegion {
         self.has_unsaved_changes
     }
 
+    #[allow(dead_code)]
     pub fn most_recently_modified(&self) -> Option<&CachedChunk> {
         self.chunks.iter().flatten().max_by_key(|c| c.cache_timestamp)
     }
@@ -565,6 +567,7 @@ impl CachedWorld {
         Self { regions: HashMap::new(), dimension, store, to_pack: Vec::new() }
     }
 
+    #[allow(dead_code)]
     pub fn dimension(&self) -> &Dimension {
         &self.dimension
     }
@@ -701,6 +704,7 @@ impl CachedWorld {
         });
     }
 
+    #[allow(dead_code)]
     pub fn region_count(&self) -> usize {
         self.regions.len()
     }

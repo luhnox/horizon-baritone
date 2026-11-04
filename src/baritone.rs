@@ -5,7 +5,7 @@
 // brought the game down on the first command).
 use super::baritone_aim::AimProcessor;
 use super::baritone_command as commands;
-use super::baritone_gworld::{on_server, WorldCache};
+use super::baritone_gworld::WorldCache;
 use super::baritone_input::Input;
 use super::baritone_p_build::BuilderProcess;
 use super::baritone_p_elytra::ElytraProcess;
@@ -32,7 +32,7 @@ use std::cell::{Cell as FlagCell, RefCell};
 pub const ID: &str = "baritone";
 /// `SettingsUtil.SETTINGS_DEFAULT_NAME`, in the mod's data folder.
 pub const SETTINGS_DEFAULT_NAME: &str = "settings.txt";
-pub const VERSION: &str = "1.1.27";
+pub const VERSION: &str = "1.1.28";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -405,19 +405,12 @@ impl Baritone {
         self.core.cache_tick(game);
         self.click_tick(game);
         self.track_death(game);
-        let allow_servers = self.core.settings.flag("allowOnServers");
-        if on_server(game) && !allow_servers {
-            if self.procs.any_active() {
-                self.force_cancel(game);
-                self.core.say_red(game, "Stopped: Baritone is off on servers. #set allowOnServers true turns it on, if the server allows it.");
-            }
-            return;
-        }
-        if game.title.is_some() || game.screen == Screen::Dead || game.sign_edit.is_some() || game.book.is_some() {
-            // The title, the death screen, a sign or a book: hold still, keep the plan.
+        if game.screen == Screen::Dead {
+            // The death screen: hold still, keep the plan.
             self.core.input.release(game);
             return;
         }
+        self.elytra_goal_update(game);
         self.control_tick(game);
         // Nobody listened to the block changes this tick (the elytra flight takes them in its own tick).
         let _ = take_block_changes();
@@ -490,6 +483,21 @@ impl Baritone {
             }
         }
         self.core.was_dead = dead;
+    }
+
+    /// `CustomGoalProcess.setGoal`, its other half: a flight in progress heads for the new goal.
+    fn elytra_goal_update(&mut self, game: &mut Game<'_>) {
+        let Some(goal) = self.procs.goal.elytra_update.take() else { return };
+        if !self.procs.elytra.is_active() {
+            return;
+        }
+        let result = match &goal {
+            Some(goal) => self.procs.elytra.path_to(&mut self.core, game, goal),
+            None => Err("The goal must be a GoalXZ or GoalBlock".to_owned()),
+        };
+        if let Err(why) = result {
+            self.core.say_red(game, &format!("Failed to update elytra goal because: {why}"));
+        }
     }
 
     /// baritone.utils.PathingControlManager.executeProcesses and preTick/postTick: ask the active
@@ -873,7 +881,6 @@ pub fn command(game: &mut Game<'_>, command: &str, ran: &mut bool) {
 // Options > Mods.
 
 const PAGE_TOGGLES: &[(&str, &str)] = &[
-    ("Allow on servers", "allowOnServers"),
     ("Place blocks (bridge, pillar)", "allowPlace"),
     ("Parkour jumps", "allowParkour"),
     ("Water bucket landings", "allowWaterBucketFall"),

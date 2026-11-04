@@ -40,13 +40,16 @@ impl Face {
 pub struct Path {
     /// FINISHED when it reached the goal, otherwise a SEGMENT.
     pub finished: bool,
+    #[allow(dead_code)]
     pub start: [i32; 3],
     /// Where the path wants to go, not necessarily where it ends.
+    #[allow(dead_code)]
     pub goal: [i32; 3],
     pub blocks: Vec<[i32; 3]>,
 }
 
 impl Path {
+    #[allow(dead_code)]
     pub fn end_pos(&self) -> [i32; 3] {
         // This should basically never be empty.
         self.blocks.last().copied().unwrap_or(self.start)
@@ -336,6 +339,7 @@ fn generate_missing_neighbours(ctx: &NetherPathfinder, cx: i32, cz: i32) {
 }
 
 /// Segment after segment until the goal, generating terrain. What the native main.cpp ran.
+#[allow(dead_code)]
 pub fn find_path_full(ctx: &NetherPathfinder, start: NodePos, goal: NodePos, fake_chunk_cost: f64) -> Result<Option<Path>, String> {
     if !is_in_bounds(ctx.max_height, start.absolute_pos_center()[1]) {
         return Err("start is out of bounds".into());

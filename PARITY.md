@@ -9,7 +9,7 @@ This port is **not complete**. This file lists the classes of Baritone 1.21.4 (`
 | missing | not written |
 | n/a | Java or Minecraft machinery with no meaning in Rust on Horizon (mixin accessors, the event bus, toasts) |
 
-Rows below: 297 (classes that go together share a row). ported 207, partial 35, missing 0, n/a 55.
+Rows below: 297 (classes that go together share a row). ported 229, partial 13, missing 0, n/a 55.
 
 All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from Settings.java, with the Java type `#set` prints), and every one is read by something, except five that have nothing to act on in Horizon: `logAsToast` (no way to push a toast of its own), `renderGoalXZBeacon`, `renderCachedChunks` and `cachedChunksOpacity` (no way to draw a beam or the cached world), and `pathingMapLoadFactor` (it tunes the Java hash map). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`. What is left in the rows below is mostly what needs a renderer of the game own: the toast, the beacon beam and the semitransparent cached chunks.
 
@@ -19,7 +19,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | Java | Status | Rust or note |
 |---|---|---|
 | BaritoneAPI | n/a | one instance, no provider |
-| IBaritone | partial | src/baritone.rs (Baritone, Core) |
+| IBaritone | ported | src/baritone.rs (Baritone, Core): one instance, as Horizon has one player |
 | IBaritoneProvider | n/a | one instance |
 | Settings | ported | src/api/settings.rs: generated from Settings.java, with Vec3i, Rotation, Mirror and Map<Block, List<Block>> parsed as the Java parses them; the JavaOnly four are hidden by #set in the Java too |
 
@@ -57,7 +57,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | Java | Status | Rust or note |
 |---|---|---|
 | Command | ported | src/command/manager.rs |
-| IBaritoneChatControl | partial | src/baritone.rs (chat, command) |
+| IBaritoneChatControl | ported | src/baritone.rs (chat, command) |
 | ICommand | n/a | a Command struct |
 | ICommandSystem | n/a | registry() in manager.rs |
 
@@ -72,8 +72,8 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 
 | Java | Status | Rust or note |
 |---|---|---|
-| IArgConsumer | partial | src/command/argument.rs (Args) |
-| ICommandArgument | partial | src/command/argument.rs |
+| IArgConsumer | partial | src/command/argument.rs (Args): the methods the commands use; a wrong value says what was expected in words, not the Java class name |
+| ICommandArgument | partial | src/command/argument.rs: words, without their index |
 
 ## api/command/datatypes
 
@@ -110,8 +110,8 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 
 | Java | Status | Rust or note |
 |---|---|---|
-| ICommandManager | partial | src/command/manager.rs |
-| Registry | partial | registry() |
+| ICommandManager | ported | src/command/manager.rs |
+| Registry | ported | registry() in src/command/manager.rs: a list, as nothing adds commands at run time |
 
 ## api/event
 
@@ -120,11 +120,11 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | BlockChangeEvent | ported | hooks/block_change.rs: every set_block, read by the elytra packer |
 | BlockInteractEvent | ported | hooks/block_interact.rs: USE only, which is all the Java listens to |
 | ChatEvent | ported | hooks/chat.rs |
-| ChunkEvent | partial | WorldCache::note_chunks |
+| ChunkEvent | partial | WorldCache::note_chunks: no event reaches a mod, so new chunks are noticed by the chunk set changing |
 | PacketEvent | n/a | Horizon has no packet hook |
 | PathEvent | n/a | PathingBehavior reads its own events; nothing outside listens |
 | PlayerUpdateEvent | n/a | native_tick |
-| RenderEvent | partial | hooks/lines.rs |
+| RenderEvent | partial | hooks/lines.rs: lines only, Horizon gives a mod no renderer of its own |
 | RotationMoveEvent | n/a |  |
 | SprintStateEvent | n/a | the sprint is Baritone input Sprint, set where the Java overrides the state |
 | TabCompleteEvent | ported | hooks/suggest_hook.rs |
@@ -177,21 +177,21 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 
 | Java | Status | Rust or note |
 |---|---|---|
-| AbstractSchematic | partial |  |
+| AbstractSchematic | partial | a trait with its size, not an abstract class |
 | CompositeSchematic | ported | src/schematic/schematic.rs |
 | CompositeSchematicEntry | ported |  |
 | FillSchematic | ported |  |
 | ISchematic | partial | Schematic trait: desired() instead of desiredState() |
-| ISchematicSystem | partial | src/schematic/format.rs |
-| IStaticSchematic | partial | StaticSchematic |
+| ISchematicSystem | ported | src/schematic/format.rs |
+| IStaticSchematic | ported | StaticSchematic |
 | MaskSchematic | ported | src/schematic/wrappers.rs |
 | MirroredSchematic | ported | src/schematic/wrappers.rs: the block states turn with Horizon structure tables |
 | ReplaceSchematic | ported |  |
 | RotatedSchematic | ported | src/schematic/wrappers.rs |
-| ShellSchematic | partial | Shape::Shell |
+| ShellSchematic | ported | src/schematic/schematic.rs (Shape::Shell) |
 | SubstituteSchematic | ported | src/schematic/wrappers.rs |
-| WallsSchematic | partial | Shape::Walls |
-| ISchematicFormat | partial |  |
+| WallsSchematic | ported | src/schematic/schematic.rs (Shape::Walls) |
+| ISchematicFormat | ported | src/schematic/format.rs |
 
 ## api/schematic/mask
 
@@ -222,29 +222,29 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 
 | Java | Status | Rust or note |
 |---|---|---|
-| BetterBlockPos | partial | Pos = [i32; 3] |
+| BetterBlockPos | ported | Pos = [i32; 3] |
 | BlockOptionalMeta | ported | src/api/block_optional_meta.rs: drops from the loot tables, src/game/scanner.rs |
 | BlockOptionalMetaLookup | ported | src/api/block_optional_meta.rs |
-| BlockUtils | partial |  |
+| BlockUtils | ported | block names carry their namespace; bare() is blockToString |
 | BooleanBinaryOperator, BooleanBinaryOperators | n/a | only BinaryOperatorMask uses them |
 | Helper | n/a | Core::say* |
 | IInputOverrideHandler | ported | src/behavior/input.rs |
 | IPlayerContext, IPlayerController | ported | src/behavior/player_context.rs, game/player_context.rs |
 | MyChunkPos, Pair, TypeUtils, VecUtils | n/a | Rust types |
 | NotificationHelper, BaritoneToast | n/a | no desktop toast |
-| PathCalculationResult | partial | Status |
+| PathCalculationResult | ported | Status in src/pathing/calc/a_star.rs |
 | RayTraceUtils | ported | GameCtx::ray_trace_towards |
 | Rotation, RotationUtils | ported | src/utils/rotation.rs, GameCtx::reachable |
 | SettingsUtil | ported | src/api/settings.rs (to_file_text, apply_file_text): settings.txt in the same format |
 | IItemStack, ILootTable | n/a | no loot tables |
 | Input | ported | src/behavior/movement_state.rs |
-| IGoalRenderPos | partial | Goal::render_pos |
+| IGoalRenderPos | ported | Goal::render_pos |
 
 ## main
 
 | Java | Status | Rust or note |
 |---|---|---|
-| Baritone | partial | src/baritone.rs |
+| Baritone | ported | src/baritone.rs: one instance |
 | BaritoneProvider, KeepName | n/a |  |
 
 ## main/behavior
@@ -278,13 +278,13 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | Java | Status | Rust or note |
 |---|---|---|
 | CommandSystem | n/a |  |
-| ExampleBaritoneControl | partial | src/baritone.rs (chat) |
+| ExampleBaritoneControl | ported | src/baritone.rs (chat), src/command/manager.rs (run), src/command/tab.rs |
 | ArgParserManager | n/a | typed parsers are methods of Args |
 | DefaultArgParsers | n/a | typed parsers are methods of Args |
-| ArgConsumer | partial | src/command/argument.rs |
-| CommandArgument | partial |  |
+| ArgConsumer | partial | src/command/argument.rs (Args): as IArgConsumer |
+| CommandArgument | partial | src/command/argument.rs: as ICommandArgument |
 | CommandArguments | n/a | typed parsers are methods of Args |
-| CommandManager | partial | src/command/manager.rs |
+| CommandManager | ported | src/command/manager.rs |
 
 ## main/command/defaults
 
@@ -306,7 +306,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | FindCommand | ported | work.rs |
 | FollowCommand | ported | work.rs |
 | ForceCancelCommand | ported | nav.rs |
-| GcCommand | partial | meta.rs: frees caches |
+| GcCommand | ported | meta.rs: frees the caches, there being no System.gc |
 | GoalCommand | ported | nav.rs |
 | GotoCommand | ported | nav.rs |
 | HelpCommand | ported | meta.rs, manager.rs |
@@ -483,20 +483,20 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | MutableMoveResult | ported | src/pathing/movement/calculation_context.rs |
 | PathBase | ported | src/pathing/calc/path.rs: cutoff_at_loaded_chunks, static_cutoff |
 | PathingBlockType | ported | src/cache/cached_world.rs |
-| BaritonePlayerContext, BaritonePlayerController | partial |  |
+| BaritonePlayerContext, BaritonePlayerController | ported | src/game/player_context.rs |
 
 ## main/utils/schematic
 
 | Java | Status | Rust or note |
 |---|---|---|
 | MapArtSchematic | ported | MaskSchematic::map_art |
-| SchematicSystem | partial |  |
+| SchematicSystem | ported | src/schematic/format.rs (read) |
 | SelectionSchematic | ported | MaskSchematic::selection |
-| StaticSchematic | partial |  |
-| DefaultSchematicFormats | partial | src/schematic/format.rs |
+| StaticSchematic | ported | src/schematic/schematic.rs |
+| DefaultSchematicFormats | ported | src/schematic/format.rs: also the game's own .nbt |
 | LitematicaSchematic | ported | src/schematic/format.rs (litematic): regions, overlaps as CompositeSchematic |
 | MCEditSchematic | ported | src/schematic/legacy.rs: the id table is the game own ItemIdFix |
 | SpongeSchematic | ported | src/schematic/format.rs (sponge): also reads version 3 |
 | LitematicaHelper | n/a | needs the Litematica mod |
 | SchematicAdapter, SchematicaHelper | n/a | need the Schematica mod |
-| VarInt | partial | inside format.rs |
+| VarInt | ported | inside src/schematic/format.rs (sponge) |

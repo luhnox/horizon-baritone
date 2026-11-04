@@ -94,10 +94,12 @@ impl Moves {
         }
     }
 
+    #[allow(dead_code)]
     pub fn dynamic_xz(self) -> bool {
         self.offsets().3
     }
 
+    #[allow(dead_code)]
     pub fn dynamic_y(self) -> bool {
         self.offsets().4
     }

@@ -15,6 +15,8 @@ pub struct Path {
     pub num_nodes: usize,
     pub goal: GoalRef,
     verified: bool,
+    /// The `logDebug` of a movement that became impossible during the calculation, for whoever post processed it.
+    pub note: Option<String>,
 }
 
 impl Path {
@@ -28,7 +30,7 @@ impl Path {
             positions.insert(0, real_start);
             node_costs.insert(0, 0.0);
         }
-        Self { positions, movements: Vec::new(), node_costs, num_nodes, goal, verified: false }
+        Self { positions, movements: Vec::new(), node_costs, num_nodes, goal, verified: false, note: None }
     }
 
     pub fn src(&self) -> Pos {
@@ -74,6 +76,8 @@ impl Path {
             match Self::run_backwards(ctx, self.positions[i], self.positions[i + 1], cost) {
                 Some(m) => movements.push(m),
                 None => {
+                    let (src, dest) = (self.positions[i], self.positions[i + 1]);
+                    self.note = Some(format!("Movement became impossible during calculation {src:?} {dest:?} {:?}", [dest[0] - src[0], dest[1] - src[1], dest[2] - src[2]]));
                     failed = true;
                     break;
                 }
@@ -82,7 +86,10 @@ impl Path {
         self.movements = movements;
         if failed {
             let keep = self.movements.len();
-            return self.cut_off(keep);
+            let note = self.note.take();
+            let mut cut = self.cut_off(keep);
+            cut.note = note;
+            return cut;
         }
         self.sanity_check();
         self
@@ -98,6 +105,7 @@ impl Path {
             num_nodes: self.num_nodes,
             goal: self.goal.clone(),
             verified: true,
+            note: None,
         };
         cut.sanity_check();
         cut
@@ -149,7 +157,7 @@ impl Path {
         positions.extend_from_slice(&second.positions[position_in_second + 1..]);
         movements.extend_from_slice(&second.movements[position_in_second..second.length() - 1]);
         let node_costs = vec![0.0; positions.len()];
-        let path = Path { positions, movements, node_costs, num_nodes: first.num_nodes + second.num_nodes, goal: first.goal.clone(), verified: true };
+        let path = Path { positions, movements, node_costs, num_nodes: first.num_nodes + second.num_nodes, goal: first.goal.clone(), verified: true, note: None };
         path.sanity_check();
         Some(path)
     }

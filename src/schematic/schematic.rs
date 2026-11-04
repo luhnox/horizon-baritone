@@ -5,6 +5,7 @@
 /// A block the build wants: its name, and the properties that matter (`facing=north`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockSpec {
+    #[allow(dead_code)]
     pub name: String,
     pub props: Vec<(String, String)>,
 }
@@ -39,6 +40,7 @@ impl BlockSpec {
     }
 
     /// Whether a world block (`name` and its `state[...]` text) is this one.
+    #[allow(dead_code)]
     pub fn matches(&self, name: &str, state: &str) -> bool {
         if self.is_air() {
             return matches!(name, "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air");
@@ -53,6 +55,7 @@ pub trait Schematic {
     /// The block that belongs at `p` (inside the size), given the name of the block that is there
     /// now. None: leave it as it is.
     fn desired(&self, p: [i32; 3], current: &str) -> Option<BlockSpec>;
+    #[allow(dead_code)]
     fn label(&self) -> String;
 }
 

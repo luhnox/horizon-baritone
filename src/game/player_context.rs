@@ -535,6 +535,10 @@ impl PlayerContext for GameCtx<'_, '_> {
     fn stop_breaking_block(&self) {
         self.input.borrow_mut().set_input_force_state(Input::ClickLeft, false);
     }
+
+    fn log_debug(&self, line: &str) {
+        self.inventory.borrow_mut().log_debug(line);
+    }
 }
 
 impl GameCtx<'_, '_> {
