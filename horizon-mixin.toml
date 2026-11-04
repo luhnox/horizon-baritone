@@ -1,12 +1,12 @@
 [mod]
 id = "baritone"
-version = "1.1.30"
+version = "1.1.31"
 priority = 100
 
 # The commit this was written against: the Horizon the instance plays. It uses the native hook
 # points (NATIVE_HOOKS_API 1) and reads the game's world, so it names the commit it needs.
 [compatibility]
-horizon_revision = "142388e1c136e622652ec7505af15d8ad195e041"
+horizon_revision = "ba6344a59cb9e755b730dcf02285fc0d33b97d3c"
 
 [[module]]
 id = "mod_utils"
@@ -693,7 +693,7 @@ bindings = [
 # `/command`, through a function the game registers in the small bridge module.
 [[module]]
 id = "mod_suggest_bridge"
-file = "crates/horizon-client/src/chat.rs"
+file = "crates/horizon-client-render/src/chat.rs"
 name = "baritone_suggest"
 visibility = "pub"
 source = "src/game/suggest_bridge.rs"
@@ -708,7 +708,7 @@ source = "src/command/tab.rs"
 id = "suggest"
 kind = "HEAD"
 cancellable = true
-target = "horizon_client::chat::ChatScreen::update_command_info"
+target = "horizon_client_render::chat::ChatScreen::update_command_info"
 helper = "hooks/suggest_hook.rs"
 bindings = [
   { name = "screen", ty = "&mut ChatScreen", value = "&mut *self" },

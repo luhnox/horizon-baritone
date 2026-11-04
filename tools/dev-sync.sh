@@ -6,7 +6,8 @@ set -e
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 : "${HORIZON_WORK:?set HORIZON_WORK to a scratch folder}"
 : "${HORIZON_LAUNCHER:?set HORIZON_LAUNCHER to the horizon-launcher data folder}"
-REV=142388e1c136e622652ec7505af15d8ad195e041
+# The Horizon commit the bundle pins (horizon-mixin.toml); HORIZON_REV tries another.
+REV=${HORIZON_REV:-ba6344a59cb9e755b730dcf02285fc0d33b97d3c}
 D="$HORIZON_WORK/mods/baritone/mixins/baritone"
 rm -rf "$D"; mkdir -p "$D"
 cp "$REPO/horizon-mixin.toml" "$D/"

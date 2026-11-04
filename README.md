@@ -11,7 +11,7 @@ world, collision and input code.
 > is here. What cannot be done: toasts (`logAsToast`), the beacon beam of `renderGoalXZBeacon` and the cached chunks
 > drawn semitransparent (`renderCachedChunks`), because Horizon gives a mod no toast or renderer of its own.
 
-Pinned to Horizon commit `142388e1c136e622652ec7505af15d8ad195e041` (Nightly 2026-11-01). The mod reads the
+Pinned to Horizon commit `ba6344a59cb9e755b730dcf02285fc0d33b97d3c`. Version 1.1.30 and older are pinned to `142388e` (Nightly 2026-11-01). The mod reads the
 game's private state, so a later Nightly may need it ported.
 
 ## Using it
