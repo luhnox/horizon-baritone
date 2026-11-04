@@ -32,7 +32,7 @@ use std::cell::{Cell as FlagCell, RefCell};
 pub const ID: &str = "baritone";
 /// `SettingsUtil.SETTINGS_DEFAULT_NAME`, in the mod's data folder.
 pub const SETTINGS_DEFAULT_NAME: &str = "settings.txt";
-pub const VERSION: &str = "1.1.37";
+pub const VERSION: &str = "1.1.38";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 

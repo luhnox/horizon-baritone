@@ -1,6 +1,6 @@
 [mod]
 id = "baritone"
-version = "1.1.37"
+version = "1.1.38"
 priority = 100
 
 # The commit this was written against: the Horizon the instance plays. It uses the native hook

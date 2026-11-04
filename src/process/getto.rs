@@ -9,7 +9,8 @@ use super::baritone_movement_helper as mh;
 use super::baritone_movement_state::Input;
 use super::baritone_pathing::{PathingCommand, Process};
 use super::baritone_player_context::PlayerContext;
-use super::baritone_p_mine::{search_world, Endless};
+use super::baritone_p_explore::{SurfaceFloor, SURFACE_DEPTH};
+use super::baritone_p_mine::{lies_underground, search_world, Endless};
 use super::baritone_utils::{dist_sq, Pos};
 use super::{Game, Screen};
 use std::rc::Rc;
@@ -147,7 +148,16 @@ impl GetToBlockProcess {
         if self.known_locations.as_ref().is_none_or(Vec::is_empty) {
             if core.settings.flag("exploreForBlocks") && !calc_failed {
                 let from = self.start.unwrap_or([0, 0, 0]);
-                return PathingCommand::ForceRevalidateGoalAndPath(rc(Endless(GoalRunAway { from: vec![from], distance: 1, maintain_y: None })));
+                // Not in the Java: for a block that is not found underground the run keeps its height and never plans a
+                // fall far below the player (see MineProcess), instead of ending up in a pit or a lake.
+                let surface = self.getting_to.as_ref().is_some_and(|b| !lies_underground(b.block()));
+                if surface {
+                    if let Some(feet) = core.player_feet(game) {
+                        core.path_hooks = Some(Rc::new(SurfaceFloor(feet[1] - SURFACE_DEPTH)));
+                    }
+                }
+                let maintain_y = if surface { Some(from[1]) } else { None };
+                return PathingCommand::ForceRevalidateGoalAndPath(rc(Endless(GoalRunAway { from: vec![from], distance: 1, maintain_y })));
             }
             core.say(game, &format!("No known locations of {label}, canceling GetToBlock"));
             if is_safe_to_cancel {

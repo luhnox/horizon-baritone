@@ -105,10 +105,10 @@ impl Goal for GoalXzMaintainY {
 }
 
 /// How far below the player a search of the surface walk may plan to end a move.
-const SURFACE_DEPTH: i32 = 6;
+pub const SURFACE_DEPTH: i32 = 6;
 
 /// The surface walk's limit: a search never ends a move deeper than `SURFACE_DEPTH` below where the walk stands.
-struct SurfaceFloor(i32);
+pub struct SurfaceFloor(pub i32);
 
 impl CostHooks for SurfaceFloor {
     fn configure(&self, ctx: &mut CalculationContext) {

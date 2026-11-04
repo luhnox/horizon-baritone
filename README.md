@@ -12,8 +12,8 @@ world, collision and input code.
 > `renderGoalIgnoreDepth` the beam is scaled toward the camera so it shows through terrain). What is not done: the cached
 > chunks drawn semitransparent (`renderCachedChunks`), because Horizon gives a mod no renderer of its own.
 >
-> One deliberate difference from the Java: `#mine` of a block that is not found underground (logs, sand, flowers, crops,
-> dirt) walks the surface looking for it instead of digging down to the strip-mining height, which is where the Java goes
+> One deliberate difference from the Java: `#mine` and `#goto <block>` of a block that is not found underground (logs, sand,
+> flowers, crops, dirt) walk the surface looking for it instead of digging down to the strip-mining height, which is where the Java goes
 > whatever the block is. Ores, ancient debris, the deepslate layer and the like still branch underground as in the Java.
 
 Pinned to Horizon commit `ba6344a59cb9e755b730dcf02285fc0d33b97d3c`. Version 1.1.30 and older are pinned to `142388e` (Nightly 2026-11-01). The mod reads the
