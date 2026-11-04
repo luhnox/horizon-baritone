@@ -106,6 +106,13 @@ impl Moves {
 
     /// Moves.apply: where the move from (x, y, z) ends and what it costs, in `result`.
     pub fn apply(self, ctx: &CalculationContext, x: i32, y: i32, z: i32, result: &mut MutableMoveResult) {
+        self.apply_unfloored(ctx, x, y, z, result);
+        if ctx.floor_y.is_some_and(|floor| result.y < floor) {
+            result.cost = COST_INF;
+        }
+    }
+
+    fn apply_unfloored(self, ctx: &CalculationContext, x: i32, y: i32, z: i32, result: &mut MutableMoveResult) {
         use Moves::*;
         match self {
             DescendEast => descend::cost(ctx, x, y, z, x + 1, z, result),

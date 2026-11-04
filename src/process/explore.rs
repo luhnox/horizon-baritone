@@ -3,12 +3,14 @@
 // and a render distance further out than the chunk itself. A chunk file lists, with #explorefilter, chunks
 // already explored elsewhere (or, inverted, the only chunks worth exploring).
 use super::baritone::Core;
+use super::baritone_calculation_context::{CalculationContext, CostHooks};
 use super::baritone_cached_world::CachedWorld;
 use super::baritone_goals::{rc, y_heuristic, Goal, GoalComposite, GoalRef, GoalXZ};
 use super::baritone_pathing::{PathingCommand, Process};
 use super::baritone_utils::Pos;
 use super::Game;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Status {
@@ -79,6 +81,8 @@ pub struct ExploreProcess {
     distance_completed: i32,
     /// The goal of the last tick, for `displayName0`.
     going_to: String,
+    /// A height to keep on the way to every goal, whatever `exploreMaintainY` says. Set by the surface walk of MineProcess.
+    maintain_y: Option<i32>,
 }
 
 /// The anonymous GoalXZ of `createGoal` that also keeps the height (`exploreMaintainY`).
@@ -100,25 +104,42 @@ impl Goal for GoalXzMaintainY {
     }
 }
 
-fn create_goal(core: &Core, x: i32, z: i32) -> GoalRef {
-    let y = core.settings.int("exploreMaintainY");
+/// How far below the player a search of the surface walk may plan to end a move.
+const SURFACE_DEPTH: i32 = 6;
+
+/// The surface walk's limit: a search never ends a move deeper than `SURFACE_DEPTH` below where the walk stands.
+struct SurfaceFloor(i32);
+
+impl CostHooks for SurfaceFloor {
+    fn configure(&self, ctx: &mut CalculationContext) {
+        ctx.floor_y = Some(self.0);
+    }
+}
+
+fn create_goal(core: &Core, forced_y: Option<i32>, x: i32, z: i32) -> GoalRef {
+    let y = forced_y.unwrap_or_else(|| core.settings.int("exploreMaintainY") as i32);
     if y == -1 {
         return rc(GoalXZ(x, z));
     }
     // Don't use a goalblock because we still want isInGoal to return true if X and Z are correct: we just want to try
     // and maintain Y on the way there, not necessarily end at that specific Y.
-    rc(GoalXzMaintainY { x, z, y: y as i32 })
+    rc(GoalXzMaintainY { x, z, y })
 }
 
 impl ExploreProcess {
     pub fn new() -> Self {
-        Self { exploration_origin: None, filter: None, distance_completed: 0, going_to: String::new() }
+        Self { exploration_origin: None, filter: None, distance_completed: 0, going_to: String::new(), maintain_y: None }
     }
 
     /// `explore(centerX, centerZ)`.
     pub fn explore(&mut self, x: i32, z: i32) {
         self.exploration_origin = Some([x, 0, z]);
         self.distance_completed = 0;
+    }
+
+    /// Keep this height on the way to every goal (the surface walk of `#mine` uses the height it began at).
+    pub fn set_maintain_y(&mut self, y: i32) {
+        self.maintain_y = Some(y);
     }
 
     /// `applyJsonFilter`: chunks (x, z) from a file. `invert`: the list is the chunks that are NOT explored.
@@ -174,7 +195,7 @@ impl ExploreProcess {
                 count = self.count_remain(core.world_data.current.as_mut().map(|d| &mut d.cache), minimum).min(minimum);
             }
             if centers.len() >= count {
-                return Some(centers.iter().map(|(x, z)| create_goal(core, *x, *z)).collect());
+                return Some(centers.iter().map(|(x, z)| create_goal(core, self.maintain_y, *x, *z)).collect());
             }
             if centers.is_empty() {
                 // We have explored everything from 0 to dist inclusive; next time we should start our check at dist + 1.
@@ -183,7 +204,7 @@ impl ExploreProcess {
             dist += 1;
             if dist > 4096 {
                 // The Java has no end to this loop; the world has one.
-                return Some(centers.iter().map(|(x, z)| create_goal(core, *x, *z)).collect());
+                return Some(centers.iter().map(|(x, z)| create_goal(core, self.maintain_y, *x, *z)).collect());
             }
         }
     }
@@ -266,6 +287,11 @@ impl Process for ExploreProcess {
             Some(goals) => {
                 let goal = rc(GoalComposite(goals));
                 self.going_to = goal.label();
+                if self.maintain_y.is_some() {
+                    if let Some(feet) = core.player_feet(game) {
+                        core.path_hooks = Some(Rc::new(SurfaceFloor(feet[1] - SURFACE_DEPTH)));
+                    }
+                }
                 PathingCommand::ForceRevalidateGoalAndPath(goal)
             }
         }

@@ -8,7 +8,7 @@ Every class of Baritone 1.21.4 (`src/api` and `src/main`, 332 Java files) is acc
 | missing | not written |
 | n/a | Java or Minecraft machinery with no meaning in Rust on Horizon (mixin accessors, the event bus, toasts) |
 
-Rows below: 297 (classes that go together share a row). ported 242, partial 1, missing 0, n/a 54.
+Rows below: 297 (classes that go together share a row). ported 247, partial 0, missing 0, n/a 50.
 
 All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from Settings.java, with the Java type `#set` prints), and every one is read by something, except five that have nothing to act on in Horizon: `logAsToast` (no way to push a toast of its own), `renderGoalXZBeacon`, `renderCachedChunks` and `cachedChunksOpacity` (no way to draw a beam or the cached world), and `pathingMapLoadFactor` (it tunes the Java hash map). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`. What is left in the rows below is mostly what needs a renderer of the game own: the toast, the beacon beam and the semitransparent cached chunks.
 
@@ -225,7 +225,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | BlockOptionalMeta | ported | src/api/block_optional_meta.rs: drops from the loot tables, src/game/scanner.rs |
 | BlockOptionalMetaLookup | ported | src/api/block_optional_meta.rs |
 | BlockUtils | ported | block names carry their namespace; bare() is blockToString |
-| BooleanBinaryOperator, BooleanBinaryOperators | n/a | only BinaryOperatorMask uses them |
+| BooleanBinaryOperator, BooleanBinaryOperators | ported | src/schematic/mask.rs: the and/or/xor/not that BinaryOperatorMask takes |
 | Helper | n/a | Core::say* |
 | IInputOverrideHandler | ported | src/behavior/input.rs |
 | IPlayerContext, IPlayerController | ported | src/behavior/player_context.rs, game/player_context.rs |
@@ -235,7 +235,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | RayTraceUtils | ported | GameCtx::ray_trace_towards |
 | Rotation, RotationUtils | ported | src/utils/rotation.rs, GameCtx::reachable |
 | SettingsUtil | ported | src/api/settings.rs (to_file_text, apply_file_text): settings.txt in the same format |
-| IItemStack, ILootTable | n/a | no loot tables |
+| IItemStack, ILootTable | n/a | mixin accessors of the game loot table; the drops themselves are read from it in src/game/scanner.rs |
 | Input | ported | src/behavior/movement_state.rs |
 | IGoalRenderPos | ported | Goal::render_pos |
 
@@ -255,7 +255,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | LookBehavior | ported | src/behavior/look.rs: Target.Mode, freeLook, blockFreeLook, antiCheatCompatibility, smoothLook, applied by baritone::look_pre and look_post around the player tick |
 | PathingBehavior | ported | src/behavior/pathing_behavior.rs: the search runs in slices of 2500 nodes a tick, there being no second thread |
 | WaypointBehavior | ported | src/baritone.rs: death waypoint with its clickable message, bed waypoint on a right-click; kept per world |
-| ForkableRandom | n/a |  |
+| ForkableRandom | ported | src/behavior/aim.rs: Xoroshiro256++ with forks, as the Java, for the aim jitter |
 
 ## main/cache
 
@@ -343,7 +343,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | Path | ported | src/pathing/calc/path.rs |
 | PathNode | ported | src/pathing/calc/a_star.rs |
 | BinaryHeapOpenSet | ported | src/pathing/calc/a_star.rs: same heap, same tie order |
-| IOpenSet, LinkedListOpenSet | n/a |  |
+| IOpenSet, LinkedListOpenSet | ported | src/pathing/calc/a_star.rs: the trait, the list (as the Java, nothing but a test uses it) and a test that it hands out the same costs as the heap; the search itself holds the heap directly |
 
 ## main/pathing/movement
 
@@ -352,7 +352,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | CalculationContext | ported | src/pathing/movement/calculation_context.rs |
 | Movement | ported | movement.rs (data, costs, valid positions) and movement_exec.rs (updateState of the eight movements) |
 | MovementHelper | ported | movement_helper.rs (costs) and movement_exec.rs (openDoors, attemptToPlaceABlock, moveTowards) |
-| MovementOption | n/a |  |
+| MovementOption | ported | src/behavior/movement_state.rs |
 | MovementState | ported | src/behavior/movement_state.rs |
 | Moves | ported | src/pathing/movement/moves.rs |
 
@@ -452,7 +452,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | GuiClick | ported | src/utils/gui_click.rs: the playing screen with the mouse let go stands in for the empty screen |
 | IRenderer | ported | src/game/render.rs (Canvas): lines and boxes, depth-tested or over everything as the Ignore setting says |
 | InputOverrideHandler | ported | src/behavior/input.rs |
-| PathRenderer | partial | src/game/render.rs: path, goal, boxes and the elytra; a GoalXZ is the game's own beacon beam (goal_beams, hooks/goal_beam.rs); renderGoalIgnoreDepth does not reach the beam, which is drawn with the beacons |
+| PathRenderer | ported | src/game/render.rs: path, goal, boxes and the elytra; a GoalXZ is the game's own beacon beam (goal_beams, hooks/goal_beam.rs), and renderGoalIgnoreDepth scales its vertices toward the camera so the beam shows through terrain as the Java's depth-less one does (checked in game) |
 | PathingCommandContext | ported | Core::path_hooks and CostHooks |
 | PathingControlManager | ported | Baritone::control_tick and pathing_behavior.rs (pre_tick, post_tick) |
 | PlayerMovementInput | n/a | the game reads keys |

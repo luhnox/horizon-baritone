@@ -1,4 +1,4 @@
-// baritone.pathing.calc.AStarPathFinder, PathNode, BinaryHeapOpenSet and AbstractNodeCostSearch. The
+// baritone.pathing.calc.AStarPathFinder, PathNode, IOpenSet, BinaryHeapOpenSet, LinkedListOpenSet and AbstractNodeCostSearch. The
 // search is the Java's, move for move and cost for cost, but it runs in slices: the game has one thread,
 // so `run` expands a number of nodes and returns, and the next call carries on from the same open set.
 // The time limits of the Java (primaryTimeout, failureTimeout) are decided by the caller in ticks.
@@ -37,16 +37,73 @@ impl PathNode {
     }
 }
 
+/// IOpenSet: what the search asks of its open set. The nodes live in one arena, so the set holds indices into it.
+pub trait IOpenSet {
+    fn is_empty(&self) -> bool;
+    /// Add a node whose combined cost is set.
+    fn insert(&mut self, nodes: &mut [PathNode], value: usize);
+    /// Tell the set a node's combined cost went down.
+    fn update(&mut self, nodes: &mut [PathNode], value: usize);
+    /// Take the node of the lowest combined cost.
+    fn remove_lowest(&mut self, nodes: &mut [PathNode]) -> Option<usize>;
+}
+
+impl IOpenSet for BinaryHeapOpenSet {
+    fn is_empty(&self) -> bool {
+        BinaryHeapOpenSet::is_empty(self)
+    }
+    fn insert(&mut self, nodes: &mut [PathNode], value: usize) {
+        BinaryHeapOpenSet::insert(self, nodes, value);
+    }
+    fn update(&mut self, nodes: &mut [PathNode], value: usize) {
+        BinaryHeapOpenSet::update(self, nodes, value);
+    }
+    fn remove_lowest(&mut self, nodes: &mut [PathNode]) -> Option<usize> {
+        Some(BinaryHeapOpenSet::remove_lowest(self, nodes)) // the heap refuses an empty pop, as the Java throws
+    }
+}
+
+/// LinkedListOpenSet, the original open set of MineBot: insert is a push, removeLowest walks the whole list. The Java
+/// notes it finds a tenth of the nodes the heap does in the same time, and nothing but its tests use it; the search here
+/// uses BinaryHeapOpenSet. The list is kept with its head at the end of the vector, so a tie goes to the newest node as
+/// it does in the Java.
+#[derive(Default)]
+pub struct LinkedListOpenSet {
+    list: Vec<usize>,
+}
+
+impl IOpenSet for LinkedListOpenSet {
+    fn is_empty(&self) -> bool {
+        self.list.is_empty()
+    }
+    fn insert(&mut self, _nodes: &mut [PathNode], value: usize) {
+        self.list.push(value);
+    }
+    fn update(&mut self, _nodes: &mut [PathNode], _value: usize) {}
+    fn remove_lowest(&mut self, nodes: &mut [PathNode]) -> Option<usize> {
+        let mut best = self.list.len().checked_sub(1)?;
+        let mut best_value = nodes[self.list[best]].combined_cost;
+        for i in (0..best).rev() {
+            let cost = nodes[self.list[i]].combined_cost;
+            if cost < best_value {
+                best_value = cost;
+                best = i;
+            }
+        }
+        Some(self.list.remove(best))
+    }
+}
+
 /// BinaryHeapOpenSet: a 1-based binary heap of node indices keyed on the combined cost. The order in
 /// which equal keys come out decides which of two equally cheap paths is found, so it is kept as it is.
 #[derive(Default)]
-struct OpenSet {
+pub struct BinaryHeapOpenSet {
     array: Vec<usize>,
     keys: Vec<f64>,
 }
 
-impl OpenSet {
-    fn new() -> Self {
+impl BinaryHeapOpenSet {
+    pub fn new() -> Self {
         Self { array: vec![usize::MAX], keys: vec![0.0] }
     }
 
@@ -143,7 +200,7 @@ pub struct AStarPathFinder {
     favoring: HashMap<Pos, f64>,
     nodes: Vec<PathNode>,
     index: HashMap<Pos, usize>,
-    open: OpenSet,
+    open: BinaryHeapOpenSet,
     start_node: usize,
     best_so_far: [usize; 7],
     best_heuristic: [f64; 7],
@@ -174,7 +231,7 @@ impl AStarPathFinder {
             favoring,
             nodes: Vec::new(),
             index: HashMap::new(),
-            open: OpenSet::new(),
+            open: BinaryHeapOpenSet::new(),
             start_node: 0,
             best_so_far: [0; 7],
             best_heuristic: [0.0; 7],
@@ -359,3 +416,41 @@ impl AStarPathFinder {
 
 #[allow(dead_code)]
 fn _moves_used(_: Moves) {}
+
+#[cfg(test)]
+mod open_set_tests {
+    use super::*;
+    use crate::baritone_goals::{rc, GoalXZ};
+
+    /// Both open sets hand out the same costs in the same order, whatever the insertion order and the updates.
+    #[test]
+    fn linked_list_and_binary_heap_agree_on_the_order_of_costs() {
+        let goal = rc(GoalXZ(0, 0));
+        let costs = [9.0, 3.5, 7.25, 3.5, 12.0, 0.5, 8.0, 3.5, 100.0, 1.0, 6.5, 2.0];
+        let mut nodes: Vec<PathNode> = costs.iter().enumerate().map(|(i, c)| {
+            let mut n = PathNode::new([i as i32, 64, 0], &goal);
+            n.combined_cost = *c;
+            n
+        }).collect();
+        let mut heap = BinaryHeapOpenSet::new();
+        let mut list = LinkedListOpenSet::default();
+        for i in 0..nodes.len() {
+            heap.insert(&mut nodes, i);
+            IOpenSet::insert(&mut list, &mut nodes, i);
+        }
+        nodes[4].combined_cost = 0.25;
+        IOpenSet::update(&mut heap, &mut nodes, 4);
+        IOpenSet::update(&mut list, &mut nodes, 4);
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        while !IOpenSet::is_empty(&heap) {
+            let n = IOpenSet::remove_lowest(&mut heap, &mut nodes).unwrap();
+            a.push(nodes[n].combined_cost);
+        }
+        while let Some(n) = IOpenSet::remove_lowest(&mut list, &mut nodes) {
+            b.push(nodes[n].combined_cost);
+        }
+        assert_eq!(a, b);
+        assert!(a.windows(2).all(|w| w[0] <= w[1]));
+        assert_eq!(a.len(), costs.len());
+    }
+}

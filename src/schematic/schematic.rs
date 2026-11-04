@@ -2,6 +2,8 @@
 // what block belongs at a position (relative to its own corner) and what to leave alone; the builder
 // compares that with the world.
 
+use super::baritone_schematic_mask::{CylinderMask, SphereMask, StaticMask};
+
 /// A block the build wants: its name, and the properties that matter (`facing=north`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockSpec {
@@ -102,32 +104,8 @@ impl ShapeSchematic {
         match self.shape {
             Shape::Walls => edge(p[0], s[0]) || edge(p[2], s[2]),
             Shape::Shell => edge(p[0], s[0]) || edge(p[1], s[1]) || edge(p[2], s[2]),
-            Shape::Sphere { hollow } => {
-                let r = [f64::from(s[0]) / 2.0, f64::from(s[1]) / 2.0, f64::from(s[2]) / 2.0];
-                let d = |i: usize, v: i32| ((f64::from(v) + 0.5 - r[i]) / r[i]).powi(2);
-                let outer = d(0, p[0]) + d(1, p[1]) + d(2, p[2]);
-                if outer > 1.0 {
-                    return false;
-                }
-                // Hollow: keep a block only if one of its neighbours is outside the sphere.
-                !hollow || [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].iter().any(|n| {
-                    let q = [p[0] + n[0], p[1] + n[1], p[2] + n[2]];
-                    d(0, q[0]) + d(1, q[1]) + d(2, q[2]) > 1.0
-                })
-            }
-            Shape::Cylinder { hollow, axis } => {
-                let (u, v) = match axis {
-                    0 => (1, 2),
-                    2 => (0, 1),
-                    _ => (0, 2),
-                };
-                let r = [f64::from(s[u]) / 2.0, f64::from(s[v]) / 2.0];
-                let d = |a: i32, b: i32| ((f64::from(a) + 0.5 - r[0]) / r[0]).powi(2) + ((f64::from(b) + 0.5 - r[1]) / r[1]).powi(2);
-                if d(p[u], p[v]) > 1.0 {
-                    return false;
-                }
-                !hollow || [[1, 0], [-1, 0], [0, 1], [0, -1]].iter().any(|n| d(p[u] + n[0], p[v] + n[1]) > 1.0)
-            }
+            Shape::Sphere { hollow } => SphereMask::new(s[0], s[1], s[2], !hollow).part_of_mask(p[0], p[1], p[2]),
+            Shape::Cylinder { hollow, axis } => CylinderMask::new(s[0], s[1], s[2], !hollow, axis).part_of_mask(p[0], p[1], p[2]),
         }
     }
 }

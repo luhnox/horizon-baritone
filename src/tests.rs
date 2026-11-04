@@ -150,7 +150,8 @@ mod extras {
         assert!(ball.desired([0, 0, 0], "").is_none(), "the corner is outside");
         assert!(shellball.desired([4, 0, 4], "").is_some() || shellball.desired([4, 1, 4], "").is_some());
         let tube = ShapeSchematic { size: [7, 4, 7], shape: Shape::Cylinder { hollow: true, axis: 1 }, spec: stone.clone() };
-        assert!(tube.desired([3, 2, 3], "").is_none() && tube.desired([0, 2, 3], "").is_some());
+        // The Java's cylinder is one smaller than its box: of seven, the wall stands at 1 and 5.
+        assert!(tube.desired([3, 2, 3], "").is_none() && tube.desired([1, 2, 3], "").is_some() && tube.desired([0, 2, 3], "").is_none());
         let swap = ReplaceSchematic { size: [2, 2, 2], from: vec!["dirt".into(), "grass_block".into()], to: BlockSpec::named("stone") };
         assert!(swap.desired([0, 0, 0], "minecraft:dirt").is_some() && swap.desired([0, 0, 0], "minecraft:sand").is_none());
     }

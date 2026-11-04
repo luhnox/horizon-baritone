@@ -3,6 +3,15 @@
 // shaft mined from where the player stands when the ore is straight above; and, when none is known, a walk away
 // from where the mining began (exploreForBlocks) or a scan of what a player could see (legitMine).
 // The Java scans on another thread; here the scan runs in the tick, every mineGoalUpdateInterval ticks.
+//
+// One thing differs from the Java on purpose. With none of the wanted blocks known, the Java always runs away from where
+// the mining began at legitMineYLevel (-59), which is where ores are but not where trees, sand or flowers are: `#mine oak_log`
+// in a place without oaks went underground. Here that is done only when every wanted block is one that lies underground
+// (`lies_underground`); for anything else the process explores the surface (ExploreProcess's walk over the chunks not yet
+// seen) until one shows up in the loaded chunks, which the rescan then finds. That walk keeps the height it began at and
+// its searches may not end a move more than six blocks below where it stands (CalculationContext.floor_y), so it never
+// jumps into a pit or a lake on the way. This holds in legitMine too.
+use super::baritone_p_explore::ExploreProcess;
 use super::baritone::Core;
 use super::baritone_bom::BlockOptionalMetaLookup;
 use super::baritone_calculation_context::{CalculationContext, CostHooks};
@@ -17,6 +26,22 @@ use super::baritone_utils::{dist_sq, Pos};
 use super::Game;
 use std::collections::HashMap;
 use std::rc::Rc;
+
+/// Whether the block is found underground and nowhere else worth walking to: ores, ancient debris, the deepslate layer, tuff,
+/// calcite, amethyst, obsidian, spawners and sculk. Everything else (logs, leaves, sand, gravel, dirt, flowers, crops,
+/// stone and the like, which reach the surface) is looked for on the surface.
+pub fn lies_underground(name: &str) -> bool {
+    let bare = name.strip_prefix("minecraft:").unwrap_or(name);
+    bare.ends_with("_ore")
+        || bare.starts_with("deepslate")
+        || bare.starts_with("cobbled_deepslate")
+        || bare.starts_with("reinforced_deepslate")
+        || bare.starts_with("raw_")
+        || bare.starts_with("sculk")
+        || bare.starts_with("tuff")
+        || bare.contains("amethyst")
+        || matches!(bare, "ancient_debris" | "calcite" | "obsidian" | "crying_obsidian" | "spawner" | "bedrock" | "smooth_basalt" | "gilded_blackstone" | "nether_gold_ore" | "glowstone")
+}
 
 /// `CachedChunk.BLOCKS_TO_KEEP_TRACK_OF`: the blocks the cached world remembers beyond the loaded chunks.
 pub const BLOCKS_TO_KEEP_TRACK_OF: &[&str] = &[
@@ -62,6 +87,8 @@ pub struct MineProcess {
     branch_point_runaway: Option<GoalRef>,
     desired_quantity: i32,
     tick_count: i32,
+    /// The walk over the surface that stands in for the underground branch, for blocks that are not underground.
+    surface: Option<ExploreProcess>,
 }
 
 impl MineProcess {
@@ -75,6 +102,7 @@ impl MineProcess {
             branch_point_runaway: None,
             desired_quantity: 0,
             tick_count: 0,
+            surface: None,
         }
     }
 
@@ -89,6 +117,7 @@ impl MineProcess {
         self.blacklist = Vec::new();
         self.branch_point = None;
         self.branch_point_runaway = None;
+        self.surface = None;
         self.anticipated_drops = HashMap::new();
         if self.filter.is_some() {
             self.rescan(core, game, Vec::new());
@@ -291,6 +320,9 @@ impl MineProcess {
             return None;
         }
         // Only when we should explore for blocks or are in legit mode we do this.
+        if !filter.blocks().iter().all(|bom| lies_underground(bom.block())) {
+            return self.explore_surface(core, game, &filter);
+        }
         let y = core.settings.int("legitMineYLevel") as i32;
         if self.branch_point.is_none() {
             self.branch_point = core.player_feet(game);
@@ -301,6 +333,26 @@ impl MineProcess {
             self.branch_point_runaway = Some(rc(Endless(GoalRunAway { from: vec![from], distance: 1, maintain_y: Some(y) })));
         }
         Some(PathingCommand::RevalidateGoalAndPath(self.branch_point_runaway.clone()?))
+    }
+}
+
+impl MineProcess {
+    /// The walk over the surface for blocks that are not underground: ExploreProcess's goals from where the mining began,
+    /// until one of the wanted blocks is in the loaded chunks. Nothing left to explore ends the mining.
+    fn explore_surface(&mut self, core: &mut Core, game: &mut Game<'_>, filter: &BlockOptionalMetaLookup) -> Option<PathingCommand> {
+        if self.surface.is_none() {
+            let feet = core.player_feet(game)?;
+            let mut explorer = ExploreProcess::new();
+            explorer.explore(feet[0], feet[2]);
+            explorer.set_maintain_y(feet[1]);
+            self.surface = Some(explorer);
+        }
+        let command = self.surface.as_mut()?.on_tick(core, game, false, true);
+        if matches!(command, PathingCommand::Defer) {
+            core.say(game, &format!("No {filter} found on the surface, cancelling"));
+            return None;
+        }
+        Some(command)
     }
 }
 
@@ -513,6 +565,7 @@ impl Process for MineProcess {
         self.blacklist.clear();
         self.branch_point = None;
         self.branch_point_runaway = None;
+        self.surface = None;
         self.anticipated_drops.clear();
         self.desired_quantity = 0;
     }

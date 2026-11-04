@@ -13,6 +13,8 @@ pub mod baritone_bom;
 pub mod baritone_world_scanner;
 #[path = "process/builder_logic.rs"]
 pub mod baritone_builder_logic;
+#[path = "schematic/mask.rs"]
+pub mod baritone_schematic_mask;
 #[path = "schematic/wrappers.rs"]
 pub mod baritone_schematic_wrappers;
 #[path = "schematic/legacy.rs"]

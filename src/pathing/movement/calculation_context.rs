@@ -98,6 +98,9 @@ pub struct CalculationContext<'a> {
     pub allow_walk_on_magma_blocks: bool,
     pub min_y: i32,
     pub max_y: i32,
+    /// No move may end below this height. Not in the Java: the surface walk of `#mine` uses it so a search never plans a
+    /// fall into a pit or a lake far below.
+    pub floor_y: Option<i32>,
     // Read by MovementHelper.
     pub blocks_to_avoid: Vec<String>,
     pub blocks_to_disallow_breaking: Vec<String>,
@@ -176,6 +179,7 @@ impl<'a> CalculationContext<'a> {
             allow_walk_on_magma_blocks: settings.flag("allowWalkOnMagmaBlocks"),
             min_y: bsi.min_y(),
             max_y: bsi.max_y(),
+            floor_y: None,
             blocks_to_avoid: settings.list("blocksToAvoid"),
             blocks_to_disallow_breaking: settings.list("blocksToDisallowBreaking"),
             avoid_updating_falling_blocks: settings.flag("avoidUpdatingFallingBlocks"),

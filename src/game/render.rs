@@ -206,6 +206,9 @@ fn draw_goal(c: &mut Canvas, sc: &Scene<'_>, goal: &GoalRef, color: u32) {
     }
 }
 
+/// How far from the camera a beam drawn over everything is put, in blocks.
+const NEAR_SIDE: f64 = 1.5;
+
 /// Each GoalXZ a goal holds, with the color it is drawn in.
 fn xz_goals(goal: &GoalRef, color: u32, s: &Settings, out: &mut Vec<(i32, i32, u32)>) {
     match goal.render_kind() {
@@ -234,7 +237,17 @@ pub fn goal_beams(b: &Baritone, game: &Game<'_>, camera: glam::DVec3, alpha: f64
     for (x, z, color) in beams {
         let origin = glam::Vec3::new((f64::from(x) - camera.x) as f32, (-camera.y) as f32, (f64::from(z) - camera.z) as f32);
         let shape = horizon_client::block_entity_render::BeamShape { scale: 1.0, time, start: min_y, height: max_y, color: color & 0x00FF_FFFF, solid_radius: 0.2, glow_radius: 0.25 };
+        let from = out.len();
         horizon_client::block_entity_render::beam(glam::Mat4::from_translation(origin), shape, sprite, out);
+        if s.flag("renderGoalIgnoreDepth") {
+            // `RenderSystem.disableDepthTest()`: the beacon pass is depth tested, so the beam is drawn as if seen from a block
+            // and a half away, along the same rays: it looks the same, and is nearer than any terrain behind it.
+            let distance = f64::from(origin.x).hypot(f64::from(origin.z));
+            let scale = (NEAR_SIDE / distance.max(NEAR_SIDE)) as f32;
+            for vertex in &mut out[from..] {
+                vertex.pos = vertex.pos.map(|c| c * scale);
+            }
+        }
     }
 }
 
