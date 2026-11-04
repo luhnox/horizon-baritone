@@ -103,13 +103,14 @@ fn tail(atlas: &HudAtlas, s: &str, room: f32, scale: f32) -> String {
     chars[from..].iter().collect()
 }
 
-/// A Bedrock slab: the dark outline, a bright edge on top, the body, and a thick shadow strip under it.
+/// A Bedrock slab: the dark outline, a bright ring, the body inside it, and a thick shadow strip under all of it.
 fn bevel(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, body: u32, light: u32, dark: u32, outline: u32, line: f32) {
     fill(batch, atlas, r, c(outline));
     let i = inset(r, line);
     fill(batch, atlas, i, c(dark));
-    fill(batch, atlas, [i[0], i[1], i[2], (i[3] - 2.0 * line).max(0.0)], c(body));
-    fill(batch, atlas, [i[0], i[1], i[2], line], c(light));
+    let ring = [i[0], i[1], i[2], (i[3] - 2.0 * line).max(0.0)];
+    fill(batch, atlas, ring, c(light));
+    fill(batch, atlas, inset(ring, line), c(body));
 }
 
 /// The colour of a label on a button: white on Baritone's purple, dark on the light gray one.

@@ -471,7 +471,7 @@ pub fn at_right(l: &Layout, row: Rect, w: f32) -> Rect {
 }
 
 pub fn switch(l: &Layout, row: Rect) -> Rect {
-    at_right(l, row, 36.0)
+    at_right(l, row, 30.0)
 }
 
 pub fn open_button(l: &Layout, row: Rect) -> Rect {
