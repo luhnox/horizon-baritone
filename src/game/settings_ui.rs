@@ -23,6 +23,7 @@ const ACCENT: u32 = 0xA83FD6;
 const ACCENT_HOVER: u32 = 0xBC5BE8;
 const ACCENT_LIGHT: u32 = 0xD58AF2;
 const ACCENT_DARK: u32 = 0x6B2491;
+const ACCENT_DEEP: u32 = 0x9738C2;
 // The grays of the screen.
 const EDGE: u32 = 0x1D1E1F;
 const PANEL: u32 = 0x313233;
@@ -140,21 +141,31 @@ fn well(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, edge: u32, f: f32) {
 
 /// The switch: Baritone's purple under an I when it is on, dark under an O when it is off, the knob on the other half.
 fn switch(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, on: bool, hover: bool, f: f32, scale: f32) {
+    // Measured from the reference toggle (30 by 16 design pixels): a square knob 16 high, and beside it a cell 14 high that
+    // stands on the same bottom edge, so the knob rises 2 above it. The cell's far side is its own outline; the near side is the
+    // knob's, which is drawn over it.
     let line = f.max(1.0).floor();
-    fill(batch, atlas, r, c(if hover { WHITE } else { EDGE }));
-    let inner = inset(r, line);
-    let half = (inner[2] / 2.0).floor();
-    let (left, right) = ([inner[0], inner[1], half, inner[3]], [inner[0] + half, inner[1], inner[2] - half, inner[3]]);
-    let (lit, knob) = if on { (left, right) } else { (right, left) };
-    if on {
-        fill(batch, atlas, lit, c(ACCENT));
-        fill(batch, atlas, [lit[0], lit[1], lit[2], line], c(ACCENT_LIGHT));
-        centered(batch, atlas, "I", lit, scale, c(WHITE), true, true);
+    let outline = if hover { WHITE } else { EDGE };
+    let (knob_w, cell_w, cell_h) = (16.0 * f, 15.0 * f, 14.0 * f);
+    let cell_y = r[1] + r[3] - cell_h;
+    let (cell, knob) = if on {
+        ([r[0], cell_y, cell_w, cell_h], [r[0] + r[2] - knob_w, r[1], knob_w, r[3]])
     } else {
-        fill(batch, atlas, lit, c(0x2B2C2D));
-        centered(batch, atlas, "O", lit, scale, c(0xB0B1B3), false, true);
+        ([r[0] + r[2] - cell_w, cell_y, cell_w, cell_h], [r[0], r[1], knob_w, r[3]])
+    };
+    fill(batch, atlas, cell, c(outline));
+    let body = inset(cell, line);
+    // The part of the cell the knob leaves showing, where the I or the O goes.
+    let shown = if on { [body[0], body[1], 14.0 * f - line, body[3]] } else { [r[0] + knob_w, body[1], 14.0 * f - line, body[3]] };
+    if on {
+        fill(batch, atlas, body, c(ACCENT_DEEP));
+        fill(batch, atlas, [body[0], body[1], body[2], line], c(ACCENT_HOVER));
+        centered(batch, atlas, "I", shown, scale, c(WHITE), false, false);
+    } else {
+        fill(batch, atlas, body, c(0x2B2C2D));
+        centered(batch, atlas, "O", shown, scale, c(0xD4D4D4), false, false);
     }
-    bevel(batch, atlas, knob, BUTTON, BUTTON_LIGHT, BUTTON_DARK, EDGE, line);
+    bevel(batch, atlas, knob, BUTTON, BUTTON_LIGHT, BUTTON_DARK, outline, line);
 }
 
 /// The slider: a dark track with a purple part up to the knob, a notch at each step, and the gray knob.
