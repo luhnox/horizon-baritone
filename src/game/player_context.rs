@@ -21,7 +21,7 @@ use super::baritone_utils::{block_pos_of, Pos};
 use super::Game;
 use horizon_core::geometry::{Axis, Direction, Vec3};
 use horizon_core::position::BlockPos;
-use horizon_world::level::PlaceContext;
+use horizon_world::level::{LevelAccess, PlaceContext};
 use horizon_world::registry::BlockStateId;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -461,20 +461,12 @@ impl PlayerContext for GameCtx<'_, '_> {
         self.game.borrow_mut().with_level(|b, level, ticks| b.can_survive(level, ticks, BlockPos::new(pos[0], pos[1], pos[2]), BlockStateId(state.id as _)))
     }
 
+    /// `placementPlausible`: the state's collision shape at the position, against every entity that blocks building.
     fn placement_plausible(&self, pos: Pos, state: &BlockState) -> bool {
         if !state.full_collision {
             return true; // an empty collision shape is unobstructed
         }
-        let (x, y, z) = (f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]));
-        let overlaps = |px: f64, py: f64, pz: f64, width: f64, height: f64| {
-            let half = width / 2.0;
-            px + half > x && px - half < x + 1.0 && py + height > y && py < y + 1.0 && pz + half > z && pz - half < z + 1.0
-        };
-        self.player(|g| {
-            let me = g.player.as_ref().is_some_and(|p| overlaps(p.position.x, p.position.y, p.position.z, f64::from(p.dimensions.width), f64::from(p.dimensions.height)));
-            let mobs = g.mobs.iter().filter(|m| m.alive()).any(|m| overlaps(m.position.x, m.position.y, m.position.z, 0.6, 1.8));
-            !(me || mobs)
-        })
+        self.game.borrow_mut().with_level(|_, level, _| level.is_unobstructed(BlockPos::new(pos[0], pos[1], pos[2]), BlockStateId(state.id)))
     }
 
     fn mobs_to_avoid(&self) -> Vec<Pos> {
