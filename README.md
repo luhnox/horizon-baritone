@@ -8,9 +8,8 @@ world, collision and input code.
 
 > **Status: close to complete.** [PARITY.md](PARITY.md) lists every class of Baritone 1.21.4 and says which are
 > written from the Java, which are simpler, and which are missing. Every setting, command, process and behavior
-> is here. What cannot be done: the click screen (`#click` walks onto the block under the crosshair), toasts
-> (`logAsToast`) and the cached chunks drawn semitransparent (`renderCachedChunks`), because Horizon gives a mod
-> no screen, toast or chunk renderer of its own.
+> is here. What cannot be done: toasts (`logAsToast`), the beacon beam of `renderGoalXZBeacon` and the cached chunks
+> drawn semitransparent (`renderCachedChunks`), because Horizon gives a mod no toast or renderer of its own.
 
 Pinned to Horizon commit `142388e1c136e622652ec7505af15d8ad195e041` (Nightly 2026-11-01). The mod reads the
 game's private state, so a later Nightly may need it ported.

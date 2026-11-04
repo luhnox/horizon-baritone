@@ -138,8 +138,6 @@ pub const COMMANDS: &[Command] = &[
             "- Left click to walk into a block.",
             "- Left click drag to create a selection for #selection.",
             "",
-            "This game has no such screen yet: here it walks onto the block under the crosshair.",
-            "",
             "Usage:",
             "> click",
         ],
@@ -340,10 +338,7 @@ fn invert(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResu
 
 fn click(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     args.require_max(0)?;
-    here(game)?;
-    let pos = game.bar_look_target().ok_or_else(|| CommandError::new("You are not looking at a block."))?;
-    begin(b, game)?;
-    b.procs.goal.set_goal_and_path(rc(GoalBlock(up(pos, 1))));
+    b.core.click.request_open();
     b.core.say(game, "aight dude");
     Ok(())
 }

@@ -35,7 +35,7 @@ use std::{
 };
 
 pub const ID: &str = "baritone";
-pub const VERSION: &str = "1.1.22";
+pub const VERSION: &str = "1.1.25";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -59,6 +59,8 @@ pub struct Core {
     pub aim: AimProcessor,
     /// LookBehavior: how a rotation a movement asked for is shown, and what the server was last sent.
     pub look: super::baritone_look::LookBehavior,
+    /// The click screen of `#click`.
+    pub click: super::baritone_gui_click::GuiClick,
     /// InventoryBehavior: the moves between the main inventory and the hotbar, and what a throwaway is.
     pub inventory: super::baritone_inventory::InventoryBehavior,
     /// The cached world of the world and dimension being played in.
@@ -100,6 +102,7 @@ impl Core {
             pathing: PathingBehavior::new(),
             aim: AimProcessor::new(super::baritone_command::now_ms()),
             look: Default::default(),
+            click: Default::default(),
             inventory: Default::default(),
             world_data: Default::default(),
             states: std::rc::Rc::new(super::baritone_state_factory::StateFactory::new(game)),
@@ -455,6 +458,7 @@ impl Baritone {
 
     fn tick(&mut self, game: &mut Game<'_>) {
         if game.player.is_none() || game.title.is_some() {
+            self.click_close(game);
             if self.procs.any_active() || self.core.pathing_busy() {
                 self.cancel_everything(game);
             }
@@ -462,6 +466,7 @@ impl Baritone {
         }
         self.core.cache.note_chunks(game);
         self.core.cache_tick(game);
+        self.click_tick(game);
         self.track_death(game);
         let allow_servers = self.core.settings.flag("allowOnServers");
         if on_server(game) && !allow_servers {
@@ -489,6 +494,49 @@ impl Baritone {
         let _ = take_block_changes();
         for line in self.core.inventory_tick(game) {
             self.core.say(game, &line);
+        }
+    }
+
+    /// The click screen: opened once the chat that typed `#click` has closed, and the block under the mouse while it is open. Any
+    /// other screen takes its place, as a new screen replaces the Java's.
+    fn click_tick(&mut self, game: &mut Game<'_>) {
+        if game.screen == Screen::Playing && self.core.click.take_open() {
+            game.capture(false);
+            // A press on the playing screen grabs the mouse again, unless the window has no focus: so it has none as far as the game
+            // can tell, until this closes.
+            game.focused = false;
+        } else if self.core.click.active {
+            if game.screen == Screen::Playing && !game.captured {
+                self.core.click.over = game.bar_mouse_block();
+            } else {
+                self.click_close(game);
+            }
+        }
+        CLICK_OPEN.with(|open| open.set(self.core.click.active));
+    }
+
+    fn click_close(&mut self, game: &mut Game<'_>) {
+        if self.core.click.active {
+            self.core.click.close();
+            // Under the control socket the window may lack focus and the game plays on regardless.
+            game.focused = game.control.is_some() || game.window.as_ref().is_some_and(|w| w.has_focus());
+            CLICK_OPEN.with(|open| open.set(false));
+        }
+    }
+
+    /// GuiClick.mouseReleased.
+    fn click_released(&mut self, game: &mut Game<'_>, button: super::baritone_gui_click::Button) {
+        use super::baritone_gui_click::Released;
+        match self.core.click.released(button) {
+            Some(Released::Selection(start, end)) => {
+                self.core.selections.remove_all();
+                self.core.selections.add(start, end);
+                let prefix = self.core.settings.text("prefix");
+                let style = text::Style { click: Some(text::ClickEvent::RunCommand(format!("{} help sel", super::baritone_command::CLICK))), ..text::Style::color(text::WHITE) };
+                self.core.say_text(game, Text::styled(format!("Selection made! For usage: {prefix}help sel"), style));
+            }
+            Some(Released::GoalAt(pos)) => self.procs.goal.set_goal_and_path(super::baritone_goals::rc(super::baritone_goals::GoalBlock(pos))),
+            None => {}
         }
     }
 
@@ -689,6 +737,53 @@ pub fn block_interact_use(game: &mut Game<'_>) {
     });
 }
 
+thread_local! {
+    /// Whether the click screen is open: the hooks below run for every key and every grab of the mouse.
+    static CLICK_OPEN: FlagCell<bool> = const { FlagCell::new(false) };
+}
+
+/// Escape on the click screen: it closes, and the mouse goes back to the game. True when it was open.
+pub fn click_escape(game: &mut Game<'_>) -> bool {
+    if !CLICK_OPEN.with(FlagCell::get) || game.screen != Screen::Playing {
+        return false;
+    }
+    let closed = with(game, |b, game| b.click_close(game)).is_some();
+    if closed {
+        game.capture(true);
+    }
+    closed
+}
+
+/// GuiClick.mouseClicked: a button pressed, any button.
+pub fn click_press(game: &mut Game<'_>) {
+    if CLICK_OPEN.with(FlagCell::get) {
+        with(game, |b, _| b.core.click.pressed());
+    }
+}
+
+/// A key or a mouse button while playing. A press through the game's control socket comes this way too.
+pub fn click_key(game: &mut Game<'_>, key: &str, pressed: bool) {
+    use super::baritone_gui_click::Button;
+    use winit::event::MouseButton;
+    if !CLICK_OPEN.with(FlagCell::get) {
+        return;
+    }
+    let button = if key == horizon_client::keybinds::mouse_name(MouseButton::Left) {
+        Button::Left
+    } else if key == horizon_client::keybinds::mouse_name(MouseButton::Right) {
+        Button::Right
+    } else {
+        return;
+    };
+    with(game, |b, game| {
+        if pressed {
+            b.core.click.pressed();
+        } else {
+            b.click_released(game, button);
+        }
+    });
+}
+
 /// `onPlayerUpdate` PRE, just before the player's motion reads its rotation.
 pub fn look_pre(game: &mut Game<'_>) {
     if !game.native_window() {
@@ -751,6 +846,7 @@ pub fn stop(game: &mut Game<'_>) {
         return;
     }
     with(game, |b, game| {
+        b.click_close(game);
         if b.procs.any_active() || b.core.pathing_busy() {
             b.cancel_everything(game);
         }

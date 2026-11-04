@@ -1,6 +1,6 @@
 [mod]
 id = "baritone"
-version = "1.1.22"
+version = "1.1.25"
 priority = 100
 
 # The commit this was written against: the Horizon the instance plays. It uses the native hook
@@ -73,6 +73,12 @@ id = "mod_notification"
 file = "crates/horizon-client/src/game.rs"
 name = "baritone_notification"
 source = "src/utils/notification.rs"
+
+[[module]]
+id = "mod_gui_click"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_gui_click"
+source = "src/utils/gui_click.rs"
 
 [[module]]
 id = "mod_state_ops"
@@ -642,6 +648,38 @@ kind = "HEAD"
 target = "horizon_client::game::remote::Game<'_>::remote_use_item_on"
 helper = "hooks/block_interact.rs"
 bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
+
+# The click screen of `#click` is the playing screen with the mouse let go. The game asks this function about every press on any
+# screen, and a release reaches the native key hook.
+[[injection]]
+id = "click_press"
+kind = "HEAD"
+target = "horizon_client::game::tweaks::Game<'_>::sort_mouse_press"
+helper = "hooks/click_press.rs"
+bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
+
+# The game asks this function about every key before it acts on it, the Escape that opens the pause menu too.
+[[injection]]
+id = "click_escape"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::tweaks::Game<'_>::sort_key_press"
+helper = "hooks/click_escape.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "key", ty = "winit::keyboard::KeyCode", value = "key" },
+]
+
+[[injection]]
+id = "click_key"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_key"
+helper = "hooks/click_key.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "key", ty = "&str", value = "key" },
+  { name = "pressed", ty = "bool", value = "pressed" },
+]
 
 # Tab completion for a `#line`: the chat screen asks Baritone for the candidates when the text is not a
 # `/command`, through a function the game registers in the small bridge module.

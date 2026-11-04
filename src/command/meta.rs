@@ -305,6 +305,16 @@ fn gc(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
 
 fn render(b: &mut Baritone, game: &mut Game<'_>, args: &mut Args) -> CommandResult {
     args.require_max(0)?;
+    // `setBlocksDirty` over the render distance and one chunk more, every height: those sections are built again.
+    let origin = feet(game)?;
+    let reach = game.settings.render_distance + 1;
+    let (cx, cz) = (origin[0] >> 4, origin[2] >> 4);
+    let columns: Vec<(i32, i32)> = game.world.chunks.keys().copied().filter(|(x, z)| (x - cx).abs() <= reach && (z - cz).abs() <= reach).collect();
+    for (x, z) in columns {
+        for section in 0..horizon_client::chunk::HEIGHT / 16 {
+            game.world.dirty_sections.insert((x, section, z));
+        }
+    }
     b.core.say(game, "Done");
     Ok(())
 }

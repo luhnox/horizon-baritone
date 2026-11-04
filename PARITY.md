@@ -9,9 +9,9 @@ This port is **not complete**. This file lists the classes of Baritone 1.21.4 (`
 | missing | not written |
 | n/a | Java or Minecraft machinery with no meaning in Rust on Horizon (mixin accessors, the event bus, toasts) |
 
-Rows below: 297 (classes that go together share a row). ported 164, partial 72, missing 20, n/a 41.
+Rows below: 297 (classes that go together share a row). ported 180, partial 62, missing 0, n/a 55.
 
-All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from Settings.java, with the Java type `#set` prints), and every one is read by something, except five that have nothing to act on in Horizon: `logAsToast` (no way to push a toast of its own), `renderGoalXZBeacon`, `renderCachedChunks` and `cachedChunksOpacity` (no way to draw a beam or the cached world), and `pathingMapLoadFactor` (it tunes the Java hash map). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`. What is left in the rows below is mostly what needs a screen or a renderer of the game own: GuiClick (`#click` walks onto the block under the crosshair), the toast, and the semitransparent cached chunks.
+All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from Settings.java, with the Java type `#set` prints), and every one is read by something, except five that have nothing to act on in Horizon: `logAsToast` (no way to push a toast of its own), `renderGoalXZBeacon`, `renderCachedChunks` and `cachedChunksOpacity` (no way to draw a beam or the cached world), and `pathingMapLoadFactor` (it tunes the Java hash map). The command layer (names, aliases, descriptions and messages) follows `baritone.command.defaults`. What is left in the rows below is mostly what needs a renderer of the game own: the toast, the beacon beam and the semitransparent cached chunks.
 
 
 ## api
@@ -42,13 +42,13 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 
 | Java | Status | Rust or note |
 |---|---|---|
-| IBlockTypeAccess | missing |  |
-| ICachedRegion | missing | no on-disk chunk cache |
-| ICachedWorld | missing | no on-disk chunk cache |
+| IBlockTypeAccess | n/a | an interface: CachedWorld::get_block |
+| ICachedRegion | ported | CachedRegion, src/cache/cached_world.rs |
+| ICachedWorld | ported | CachedWorld, src/cache/cached_world.rs |
 | IWaypoint | ported | src/cache/waypoints.rs |
 | IWaypointCollection | ported | src/cache/waypoints.rs |
-| IWorldData | missing |  |
-| IWorldProvider | missing |  |
+| IWorldData | ported | WorldData, src/game/world_data.rs |
+| IWorldProvider | ported | WorldProvider, src/game/world_data.rs |
 | IWorldScanner | ported | src/game/scanner.rs |
 | Waypoint | ported | src/cache/waypoints.rs |
 
@@ -65,8 +65,8 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 
 | Java | Status | Rust or note |
 |---|---|---|
-| IArgParser | missing | typed parsers are methods of Args |
-| IArgParserManager | missing | typed parsers are methods of Args |
+| IArgParser | n/a | typed parsers are methods of Args |
+| IArgParserManager | n/a | typed parsers are methods of Args |
 
 ## api/command/argument
 
@@ -197,19 +197,19 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 
 | Java | Status | Rust or note |
 |---|---|---|
-| AbstractMask | missing | masks are replaced by Shape |
-| Mask | missing | masks are replaced by Shape |
-| PreComputedMask | missing | masks are replaced by Shape |
-| StaticMask | missing | masks are replaced by Shape |
-| BinaryOperatorMask | missing | masks are replaced by Shape |
-| NotMask | missing | masks are replaced by Shape |
+| AbstractMask | n/a | API for composing masks that nothing in Baritone composes: the shapes are Shape, the builder masks are MaskSchematic |
+| Mask | n/a | API for composing masks that nothing in Baritone composes: the shapes are Shape, the builder masks are MaskSchematic |
+| PreComputedMask | n/a | API for composing masks that nothing in Baritone composes: the shapes are Shape, the builder masks are MaskSchematic |
+| StaticMask | n/a | API for composing masks that nothing in Baritone composes: the shapes are Shape, the builder masks are MaskSchematic |
+| BinaryOperatorMask | n/a | API for composing masks that nothing in Baritone composes: the shapes are Shape, the builder masks are MaskSchematic |
+| NotMask | n/a | API for composing masks that nothing in Baritone composes: the shapes are Shape, the builder masks are MaskSchematic |
 
 ## api/schematic/mask/shape
 
 | Java | Status | Rust or note |
 |---|---|---|
-| CylinderMask | partial | Shape::Cylinder, Shape::Sphere |
-| SphereMask | partial | Shape::Cylinder, Shape::Sphere |
+| CylinderMask | ported | Shape::Cylinder, Shape::Sphere |
+| SphereMask | ported | Shape::Cylinder, Shape::Sphere |
 
 ## api/selection
 
@@ -226,7 +226,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | BlockOptionalMeta | partial | name and properties as text |
 | BlockOptionalMetaLookup | partial | a set of names |
 | BlockUtils | partial |  |
-| BooleanBinaryOperator, BooleanBinaryOperators | missing |  |
+| BooleanBinaryOperator, BooleanBinaryOperators | n/a | only BinaryOperatorMask uses them |
 | Helper | n/a | Core::say* |
 | IInputOverrideHandler | ported | src/behavior/input.rs |
 | IPlayerContext, IPlayerController | ported | src/behavior/player_context.rs, game/player_context.rs |
@@ -266,7 +266,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | CachedChunk | ported | src/cache/cached_world.rs |
 | CachedRegion | ported | src/cache/cached_world.rs, the .bcr format |
 | CachedWorld | partial | src/cache/cached_world.rs: no packer thread, a few chunks a tick |
-| ChunkPacker | partial | src/game/world_data.rs: the flow of border water is guessed |
+| ChunkPacker | ported | src/game/world_data.rs: the flow of border water is the game own getFlow |
 | FasterWorldScanner | ported | src/game/scanner.rs: same chunk spiral and section order |
 | WaypointCollection | ported | src/cache/waypoints.rs |
 | WorldData | ported | src/game/world_data.rs |
@@ -279,11 +279,11 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 |---|---|---|
 | CommandSystem | n/a |  |
 | ExampleBaritoneControl | partial | src/baritone.rs (chat) |
-| ArgParserManager | missing |  |
-| DefaultArgParsers | missing |  |
+| ArgParserManager | n/a | typed parsers are methods of Args |
+| DefaultArgParsers | n/a | typed parsers are methods of Args |
 | ArgConsumer | partial | src/command/argument.rs |
 | CommandArgument | partial |  |
-| CommandArguments | missing |  |
+| CommandArguments | n/a | typed parsers are methods of Args |
 | CommandManager | partial | src/command/manager.rs |
 
 ## main/command/defaults
@@ -293,8 +293,8 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | AxisCommand | ported | nav.rs |
 | BlacklistCommand | ported | work.rs |
 | BuildCommand | partial | build.rs: own file reader, no Schematica |
-| ClickCommand | partial | nav.rs: crosshair approximation, no GUI |
-| ComeCommand | partial | nav.rs: goes to your feet, there is no camera |
+| ClickCommand | ported | nav.rs |
+| ComeCommand | ported | nav.rs: the camera entity is the player here |
 | CommandAlias | ported | manager.rs |
 | DefaultCommands | ported | manager.rs (ORDER) |
 | ETACommand | ported | nav.rs |
@@ -316,11 +316,11 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | PathCommand | ported | nav.rs |
 | PickupCommand | ported | work.rs |
 | ProcCommand | ported | nav.rs |
-| ReloadAllCommand | partial | meta.rs: settings and waypoints, no chunk cache |
-| RenderCommand | partial | meta.rs: prints Done |
-| RepackCommand | partial | meta.rs |
-| SaveAllCommand | partial | meta.rs |
-| SchematicaCommand | missing | not in DefaultCommands of 1.21.4 |
+| ReloadAllCommand | ported | meta.rs |
+| RenderCommand | ported | meta.rs |
+| RepackCommand | ported | meta.rs |
+| SaveAllCommand | ported | meta.rs |
+| SchematicaCommand | n/a | not in DefaultCommands of 1.21.4, and it needs the Schematica mod |
 | SelCommand | ported | build.rs |
 | SetCommand | ported | meta.rs |
 | SurfaceCommand | ported | nav.rs |
@@ -450,7 +450,7 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | BlockPlaceHelper | partial | behavior/pathing.rs (click_block) |
 | BlockStateInterface | ported | src/utils/block_state_interface.rs, answered by game/player_context.rs |
 | BlockStateInterfaceAccessWrapper | n/a |  |
-| GuiClick | missing |  |
+| GuiClick | ported | src/utils/gui_click.rs: the playing screen with the mouse let go stands in for the empty screen |
 | IRenderer | partial | src/game/render.rs |
 | InputOverrideHandler | ported | src/behavior/input.rs |
 | PathRenderer | partial | src/game/render.rs: path, goal, selections and elytra as lines (depth and on top); the GoalXZ beacon beam is a column of lines |
@@ -479,9 +479,9 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 |---|---|---|
 | Avoidance | ported | src/pathing/avoidance.rs: spiders, angry piglins and endermen are not told apart |
 | BetterWorldBorder | ported | GameCtx::entirely_contains and can_place_at |
-| Favoring | partial | a map of factors in the search; the previous-path part is not built yet, Avoidance is missing |
+| Favoring | ported | create_pathfinder in src/behavior/pathing_behavior.rs: a map of factors in the search |
 | MutableMoveResult | ported | src/pathing/movement/calculation_context.rs |
-| PathBase | missing |  |
+| PathBase | ported | src/pathing/calc/path.rs: cutoff_at_loaded_chunks, static_cutoff |
 | PathingBlockType | partial | Cell |
 | BaritonePlayerContext, BaritonePlayerController | partial |  |
 

@@ -217,6 +217,16 @@ pub fn lines(b: &Baritone, game: &Game<'_>, out: &mut Canvas) {
         }
     }
 
+    // GuiClick.onRender: the block under the mouse, and the box a drag would select.
+    if let Some(over) = b.core.click.over {
+        draw_many_selection_boxes(out, &sc, [over].iter(), 0xFF00_FFFF);
+        if let Some(start) = b.core.click.click_start.filter(|start| *start != over) {
+            let lo = [0, 1, 2].map(|i| f64::from(start[i].min(over[i])));
+            let hi = [0, 1, 2].map(|i| f64::from(start[i].max(over[i])) + 1.0);
+            out.aabb(true, lo, hi, with_alpha(0xFFFF_0000, LINE_ALPHA), sc.path_width());
+        }
+    }
+
     if s.flag("renderPath") {
         let current = pathing.current.as_ref();
         if let Some(ex) = current {

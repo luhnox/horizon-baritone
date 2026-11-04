@@ -647,7 +647,7 @@ impl PathingBehavior {
             return;
         }
         if search.goal.is_in_goal(executor.path.dest()) {
-            self.debug(format!("Finished finding a path from {:?} to {}. {} nodes considered", search.start, search.goal.label(), executor.path.num_nodes));
+            self.debug(format!("Finished finding a path from {} to {}. {} nodes considered", pos_label(search.start), search.goal.label(), executor.path.num_nodes));
         } else {
             self.debug(format!("Found path segment from {} towards {}. {} nodes considered", pos_label(search.start), search.goal.label(), executor.path.num_nodes));
         }

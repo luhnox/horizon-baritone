@@ -21,6 +21,8 @@ pub mod baritone_schematic_wrappers;
 pub mod baritone_schematic_legacy;
 #[path = "utils/notification.rs"]
 pub mod baritone_notification;
+#[path = "utils/gui_click.rs"]
+pub mod baritone_gui_click;
 #[path = "process/elytra/chunk.rs"]
 pub mod baritone_elytra_chunk;
 #[path = "process/elytra/noise.rs"]

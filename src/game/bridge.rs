@@ -50,6 +50,16 @@ impl Game<'_> {
         let dir = super::super::view_vector(self.yaw, self.pitch);
         self.clip_ray(eye, dir, 64.0).map(|hit| hit.pos)
     }
+    /// GuiClick.render: the block under the mouse, as far as the view goes (the far plane the Java unprojects to).
+    pub(in crate::game) fn bar_mouse_block(&mut self) -> Option<[i32; 3]> {
+        let partial = self.clock.camera_fraction() as f32;
+        let (camera, yaw, pitch) = self.camera_view(partial)?;
+        let origin = camera.to_array();
+        let fov = self.fov_degrees(partial, origin);
+        let dir = super::super::baritone_gui_click::ray_through(self.cursor, self.gui_size(), fov, yaw, pitch);
+        let reach = f64::from(self.settings.render_distance) * 16.0 * 4.0;
+        self.clip_ray(origin, dir, reach).map(|hit| hit.pos)
+    }
     /// The player's eyes, and how far a hand reaches.
     pub(in crate::game) fn bar_eye(&self) -> Option<[f64; 3]> {
         self.eye_position()

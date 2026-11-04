@@ -7,6 +7,10 @@ use super::baritone_calculation_context::CalculationContext;
 use super::baritone_movement_helper as mh;
 use super::baritone_state_factory::StateFactory;
 use super::Game;
+use horizon_core::position::BlockPos;
+use horizon_world::fluid::FluidState;
+use horizon_world::fluid_flow::{flow_at, FluidFlowWorld};
+use horizon_world::registry::BlockStateId;
 use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -117,6 +121,46 @@ impl LoadedChunk<'_> {
     }
 }
 
+/// The loaded world, as `FlowingFluid.getFlow` reads it.
+struct FlowView<'a> {
+    game: &'a Game<'a>,
+}
+
+impl FlowView<'_> {
+    fn flow(mut self, p: [i32; 3]) -> std::io::Result<horizon_core::geometry::Vec3> {
+        let at = BlockPos::new(p[0], p[1], p[2]);
+        let fluid = FluidFlowWorld::fluid(&mut self, at)?;
+        flow_at(&mut self, fluid, at)
+    }
+}
+
+impl FluidFlowWorld for FlowView<'_> {
+    type Error = std::io::Error;
+    type Block = BlockStateId;
+
+    fn fluid(&mut self, p: BlockPos) -> std::io::Result<FluidState> {
+        let state = self.game.pack.assets.registry.state(self.game.world.block(p.x, p.y, p.z));
+        FluidState::from_block(state.ok_or_else(|| std::io::Error::other("a block state the registry does not know"))?)
+    }
+
+    fn block(&mut self, p: BlockPos) -> std::io::Result<BlockStateId> {
+        Ok(self.game.world.block(p.x, p.y, p.z))
+    }
+
+    fn blocks_fluid_flow(&self, s: BlockStateId) -> bool {
+        let assets = &self.game.pack.assets;
+        assets.registry.state(s).is_some_and(|state| assets.blocks_fluid_flow.contains(&state.name))
+    }
+
+    fn is_ice_class(&self, s: BlockStateId) -> bool {
+        self.game.res.facts().get(s).classes.iter().any(|c| c.as_ref() == "IceBlock")
+    }
+
+    fn is_face_sturdy(&mut self, s: BlockStateId, _: BlockPos, d: horizon_core::geometry::Direction) -> std::io::Result<bool> {
+        Ok(self.game.res.facts().get(s).sturdy_full & (1 << d as u8) != 0)
+    }
+}
+
 /// The blocks `ChunkPacker` calls air for a path: AirBlock, TallGrassBlock, DoublePlantBlock and FlowerBlock.
 fn plant_like(name: &str) -> bool {
     matches!(
@@ -167,12 +211,9 @@ impl PackSource for LoadedChunk<'_> {
                 return PathingBlockType::Avoid;
             }
             if x == 0 || x == 15 || z == 0 || z == 15 {
-                // The flow of the water at the border: it runs where a neighbour is not the same still water.
-                let open = |dx: i32, dz: i32| {
-                    let n = self.state(x + dx, y, z + dz);
-                    !mh::is_water(&n) && !n.full_collision
-                };
-                return if open(1, 0) || open(-1, 0) || open(0, 1) || open(0, -1) { PathingBlockType::Water } else { PathingBlockType::Avoid };
+                // `getFlow`, by the game's own function: at the border of the chunk only water that moves is water to a path.
+                let flow = FlowView { game: self.game }.flow([self.cx * 16 + x, y, self.cz * 16 + z]);
+                return if flow.is_ok_and(|f| f.x != 0.0 || f.z != 0.0) { PathingBlockType::Water } else { PathingBlockType::Avoid };
             }
             return PathingBlockType::Water;
         }
