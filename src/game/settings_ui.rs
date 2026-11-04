@@ -31,10 +31,11 @@ const WELL: u32 = 0x242526;
 const ROW_A: u32 = 0x2C2D2E;
 const ROW_B: u32 = 0x282829;
 const ROW_HOVER: u32 = 0x363738;
-const BUTTON: u32 = 0x6E6F72;
-const BUTTON_HOVER: u32 = 0x808184;
-const BUTTON_LIGHT: u32 = 0x9D9EA1;
-const BUTTON_DARK: u32 = 0x48494B;
+const BUTTON: u32 = 0xD0D1D4;
+const BUTTON_HOVER: u32 = 0xE6E7EA;
+const BUTTON_LIGHT: u32 = 0xF4F4F6;
+const BUTTON_DARK: u32 = 0x58585A;
+const INK: u32 = 0x1E1E1F;
 const WHITE: u32 = 0xFFFFFF;
 const MUTED: u32 = 0xA9AAAC;
 
@@ -72,8 +73,8 @@ fn centered(batch: &mut HudBatch, atlas: &HudAtlas, s: &str, r: Rect, scale: f32
 }
 
 /// Text starting at `x`, centred up and down in `r`.
-fn left(batch: &mut HudBatch, atlas: &HudAtlas, s: &str, x: f32, r: Rect, scale: f32, color: u32) {
-    put(batch, atlas, s, x, r[1] + (r[3] - 8.0 * scale) / 2.0, scale, color, true, false);
+fn left(batch: &mut HudBatch, atlas: &HudAtlas, s: &str, x: f32, r: Rect, scale: f32, color: u32, shadow: bool) {
+    put(batch, atlas, s, x, r[1] + (r[3] - 8.0 * scale) / 2.0, scale, color, shadow, false);
 }
 
 /// `s` cut with "..." to fit in `room` pixels at `scale`.
@@ -102,26 +103,31 @@ fn tail(atlas: &HudAtlas, s: &str, room: f32, scale: f32) -> String {
     chars[from..].iter().collect()
 }
 
-/// A bevelled box: the dark outline, a light edge above and to the left, a dark one below and to the right.
+/// A Bedrock slab: the dark outline, a bright edge on top, the body, and a thick shadow strip under it.
 fn bevel(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, body: u32, light: u32, dark: u32, outline: u32, line: f32) {
     fill(batch, atlas, r, c(outline));
     let i = inset(r, line);
     fill(batch, atlas, i, c(dark));
-    fill(batch, atlas, [i[0], i[1], i[2] - line, i[3] - line], c(light));
-    fill(batch, atlas, inset(i, line), c(body));
+    fill(batch, atlas, [i[0], i[1], i[2], (i[3] - 2.0 * line).max(0.0)], c(body));
+    fill(batch, atlas, [i[0], i[1], i[2], line], c(light));
 }
 
-/// A Bedrock button: gray, or Baritone's purple when it is the main one or the tab that is open; a hovered one is lighter and
-/// outlined in white.
+/// The colour of a label on a button: white on Baritone's purple, dark on the light gray one.
+fn ink(main: bool) -> u32 {
+    c(if main { WHITE } else { INK })
+}
+
+/// A Bedrock button: light gray with dark text, or Baritone's purple when it is the main one or the tab that is open; a hovered
+/// one is lighter and outlined.
 fn button(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, label: &str, hover: bool, main: bool, f: f32, scale: f32) {
     let line = f.max(1.0).floor();
-    let outline = if hover { WHITE } else { EDGE };
+    let outline = if hover { if main { WHITE } else { ACCENT } } else { EDGE };
     if main {
         bevel(batch, atlas, r, if hover { ACCENT_HOVER } else { ACCENT }, ACCENT_LIGHT, ACCENT_DARK, outline, line);
     } else {
         bevel(batch, atlas, r, if hover { BUTTON_HOVER } else { BUTTON }, BUTTON_LIGHT, BUTTON_DARK, outline, line);
     }
-    centered(batch, atlas, label, r, scale, c(WHITE), true, false);
+    centered(batch, atlas, label, r, scale, ink(main), main, false);
 }
 
 /// A dark well: what a text field and the list sit in.
@@ -168,11 +174,11 @@ fn slider(batch: &mut HudBatch, atlas: &HudAtlas, t: Rect, steps: usize, at: Opt
 }
 
 /// The little arrow on a dropdown.
-fn chevron(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, f: f32) {
+fn chevron(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, color: u32, f: f32) {
     let (cx, cy) = (r[0] + r[2] - 8.0 * f, r[1] + r[3] / 2.0 - 1.5 * f);
     for i in 0..3 {
         let w = (6.0 - 2.0 * i as f32) * f;
-        fill(batch, atlas, [cx - w / 2.0, cy + i as f32 * f, w, f], c(WHITE));
+        fill(batch, atlas, [cx - w / 2.0, cy + i as f32 * f, w, f], color);
     }
 }
 
@@ -191,11 +197,11 @@ fn text_field(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, text: &str, hint:
     well(batch, atlas, r, if focused { ACCENT } else { EDGE }, f);
     let room = r[2] - pad - 6.0 * f;
     if text.is_empty() && !focused {
-        left(batch, atlas, &fitted(atlas, hint, room, scale), r[0] + pad, r, scale, c(0x707173));
+        left(batch, atlas, &fitted(atlas, hint, room, scale), r[0] + pad, r, scale, c(0x707173), true);
         return;
     }
     let shown = tail(atlas, text, room, scale);
-    left(batch, atlas, &shown, r[0] + pad, r, scale, c(WHITE));
+    left(batch, atlas, &shown, r[0] + pad, r, scale, c(WHITE), true);
     let blink = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() / 500 % 2);
     if focused && blink == 0 {
         let x = r[0] + pad + width(atlas, &shown, scale, false);
@@ -288,7 +294,7 @@ pub fn draw(b: &mut Baritone, game: &Game<'_>, batch: &mut HudBatch) {
         button(batch, atlas, *r, "", over, selected, f, t);
         let cat = &CATEGORIES[i];
         picture(game, batch, cat.icon, r[0] + 4.0 * f, r[1] + (r[3] - 12.0 * f) / 2.0, 12.0, f);
-        left(batch, atlas, &fitted(atlas, cat.label, r[2] - 24.0 * f, t), r[0] + 20.0 * f, *r, t, c(WHITE));
+        left(batch, atlas, &fitted(atlas, cat.label, r[2] - 24.0 * f, t), r[0] + 20.0 * f, *r, t, ink(selected), selected);
         widgets::record(cat.label, *r, true);
         widgets::widget_cursor(over, true);
     }
@@ -344,9 +350,10 @@ pub fn draw(b: &mut Baritone, game: &Game<'_>, batch: &mut HudBatch) {
                     }
                     Control::Choice(..) => {
                         let d = screen::dropdown(&l, r);
-                        button(batch, atlas, d, "", hover(d) && !dropdown_open, state.open == Some(i), f, t * 0.9);
-                        left(batch, atlas, &fitted(atlas, &screen::value(item, settings), d[2] - 18.0 * f, t * 0.9), d[0] + 6.0 * f, d, t * 0.9, c(WHITE));
-                        chevron(batch, atlas, d, f);
+                        let open = state.open == Some(i);
+                        button(batch, atlas, d, "", hover(d) && !dropdown_open, open, f, t * 0.9);
+                        left(batch, atlas, &fitted(atlas, &screen::value(item, settings), d[2] - 18.0 * f, t * 0.9), d[0] + 6.0 * f, d, t * 0.9, ink(open), open);
+                        chevron(batch, atlas, d, ink(open), f);
                     }
                     Control::BlockInput => {
                         let field = screen::block_field(&l, r);
@@ -392,7 +399,7 @@ pub fn draw(b: &mut Baritone, game: &Game<'_>, batch: &mut HudBatch) {
         for (value, o) in values.iter().zip(screen::dropdown_options(d, values.len())) {
             let current = settings.get(name) == *value;
             button(batch, atlas, o, "", hover(o), current, f, t * 0.9);
-            left(batch, atlas, &screen::pretty(value), o[0] + 6.0 * f, o, t * 0.9, c(WHITE));
+            left(batch, atlas, &screen::pretty(value), o[0] + 6.0 * f, o, t * 0.9, ink(current), current);
             widgets::record(&screen::pretty(value), o, true);
         }
     }
