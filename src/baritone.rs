@@ -32,7 +32,7 @@ use std::cell::{Cell as FlagCell, RefCell};
 pub const ID: &str = "baritone";
 /// `SettingsUtil.SETTINGS_DEFAULT_NAME`, in the mod's data folder.
 pub const SETTINGS_DEFAULT_NAME: &str = "settings.txt";
-pub const VERSION: &str = "1.1.39";
+pub const VERSION: &str = "1.1.42";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -53,6 +53,8 @@ pub struct Core {
     pub look: super::baritone_look::LookBehavior,
     /// The click screen of `#click`.
     pub click: super::baritone_gui_click::GuiClick,
+    /// Baritone's page in Options > Mods: the category open and how far its lists are scrolled.
+    pub ui: super::baritone_screen::SettingsScreen,
     /// InventoryBehavior: the moves between the main inventory and the hotbar, and what a throwaway is.
     pub inventory: super::baritone_inventory::InventoryBehavior,
     /// The cached world of the world and dimension being played in.
@@ -92,6 +94,7 @@ impl Core {
             aim: AimProcessor::new(super::baritone_command::now_ms()),
             look: Default::default(),
             click: Default::default(),
+            ui: Default::default(),
             inventory: Default::default(),
             world_data: Default::default(),
             states: std::rc::Rc::new(super::baritone_state_factory::StateFactory::new(game)),
@@ -459,6 +462,32 @@ impl Baritone {
         CLICK_OPEN.with(|open| open.set(self.core.click.active));
     }
 
+    /// A press (or a drag) on Baritone's page in Options > Mods: 0 nothing came of it, 1 a button was pressed, 2 Done or close.
+    fn page_click(&mut self, game: &mut Game<'_>, cursor: (f32, f32), size: (f32, f32), drag: bool) -> u8 {
+        use super::baritone_screen::{self as screen, Action};
+        let before = self.core.ui.category;
+        match self.core.ui.click(cursor, size, drag, &self.core.settings) {
+            Action::None => u8::from(self.core.ui.category != before),
+            Action::Back => 2,
+            Action::Set(name, value) => {
+                let _ = self.core.set_setting(game, name, &value);
+                u8::from(!drag)
+            }
+            Action::Open(url) => {
+                super::baritone_notification::open_uri(url);
+                1
+            }
+            Action::ResetCategory(category) => {
+                for name in screen::reset_names(category) {
+                    if let Some(def) = settings::find(name) {
+                        self.core.reset_setting(game, def);
+                    }
+                }
+                1
+            }
+        }
+    }
+
     fn click_close(&mut self, game: &mut Game<'_>) {
         if self.core.click.active {
             self.core.click.close();
@@ -740,6 +769,34 @@ pub fn click_key(game: &mut Game<'_>, key: &str, pressed: bool) {
         } else {
             b.click_released(game, button);
         }
+    });
+}
+
+/// Whether the page open in Options is Baritone's own (Options > Mods > Baritone).
+pub fn page_open(game: &Game<'_>) -> bool {
+    matches!(game.ui.options.page(), horizon_client::options_ui::Page::NativeMod(i)
+        if game.settings.mods.installed.get(i).is_some_and(|m| m.id == ID))
+}
+
+pub fn page_draw(game: &mut Game<'_>, batch: &mut horizon_client::hud::HudBatch) {
+    with(game, |b, game| super::baritone_settings_ui::draw(b, game, batch));
+}
+
+/// A press at the cursor (`drag`: a movement with the button held): see `Baritone::page_click`. A right click does nothing.
+pub fn page_press(game: &mut Game<'_>, drag: bool, right: bool) -> u8 {
+    if right {
+        return 0;
+    }
+    let (cursor, size) = (game.cursor, game.gui_size());
+    with(game, |b, game| b.page_click(game, cursor, size, drag)).unwrap_or(0)
+}
+
+/// The wheel over the page scrolls the categories or the rows, whichever the cursor is over.
+pub fn page_wheel(game: &mut Game<'_>, amount: f32) {
+    let (cursor, size) = (game.cursor, game.gui_size());
+    with(game, |b, _| {
+        let l = super::baritone_screen::layout(size.0, size.1);
+        b.core.ui.wheel(amount, cursor, &l);
     });
 }
 

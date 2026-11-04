@@ -23,6 +23,8 @@ pub mod baritone_schematic_legacy;
 pub mod baritone_notification;
 #[path = "utils/gui_click.rs"]
 pub mod baritone_gui_click;
+#[path = "ui/settings_screen.rs"]
+pub mod baritone_screen;
 #[path = "process/elytra/chunk.rs"]
 pub mod baritone_elytra_chunk;
 #[path = "process/elytra/noise.rs"]

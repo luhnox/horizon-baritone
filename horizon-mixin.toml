@@ -1,6 +1,6 @@
 [mod]
 id = "baritone"
-version = "1.1.39"
+version = "1.1.42"
 priority = 100
 
 # The commit this was written against: the Horizon the instance plays. It uses the native hook
@@ -593,6 +593,65 @@ bindings = [
   { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
   { name = "mod_id", ty = "&str", value = "mod_id" },
   { name = "buttons", ty = "&mut Vec<String>", value = "&mut *buttons" },
+]
+
+# Baritone's page in Options > Mods is a screen of its own, in the style of the Punchy settings screen: what it shows, where
+# everything stands and what a click does (plain Rust, tested in the lib crate), and the drawing of it. Four hooks in the game's
+# options wrappers hand it the drawing, the mouse, a drag and the wheel while the page open is Baritone's.
+[[module]]
+id = "mod_screen"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_screen"
+source = "src/ui/settings_screen.rs"
+
+[[module]]
+id = "mod_settings_ui"
+file = "crates/horizon-client/src/game.rs"
+name = "baritone_settings_ui"
+source = "src/game/settings_ui.rs"
+
+[[injection]]
+id = "page_draw"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::options::Game<'_>::draw_options"
+helper = "hooks/page_draw.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "batch", ty = "&mut horizon_client::hud::HudBatch", value = "&mut *batch" },
+]
+
+[[injection]]
+id = "page_mouse"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::options::Game<'_>::options_mouse"
+helper = "hooks/page_mouse.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "pressed", ty = "bool", value = "pressed" },
+  { name = "right", ty = "bool", value = "right" },
+]
+
+[[injection]]
+id = "page_drag"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::options::Game<'_>::options_drag"
+helper = "hooks/page_drag.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+]
+
+[[injection]]
+id = "page_wheel"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::options::Game<'_>::options_scroll"
+helper = "hooks/page_wheel.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "amount", ty = "f32", value = "amount" },
 ]
 
 [[injection]]

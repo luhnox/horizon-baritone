@@ -499,3 +499,9 @@ All 248 settings of Baritone 1.21.4 that `#set` shows are here (generated from S
 | LitematicaHelper | n/a | needs the Litematica mod |
 | SchematicAdapter, SchematicaHelper | n/a | need the Schematica mod |
 | VarInt | ported | inside src/schematic/format.rs (sponge) |
+
+## Horizon only
+
+| What | Where |
+|---|---|
+| The settings screen: Options > Mods > Baritone is a Punchy-style screen (title bar, categories, rows with a switch or a slider) instead of a list of buttons. Switches and sliders set the same settings `#set` does; Reset page puts a category back. | src/ui/settings_screen.rs (what it shows, layout, clicks; tested), src/game/settings_ui.rs (drawing), hooks/page_*.rs |
