@@ -6,9 +6,9 @@ This project is a port to Rust of **Baritone** by leijurv and the Baritone contr
 movement costs and the structure of the processes are taken from that source, so this work is a
 derivative of it and is distributed under the same license.
 
-Before publishing, add the full text of the LGPL-3.0 (and of the GPL-3.0 it refers to) as `LICENSE`
-and `COPYING`: https://www.gnu.org/licenses/lgpl-3.0.txt and https://www.gnu.org/licenses/gpl-3.0.txt.
-This repository does not include them yet.
+The license text is in [LICENSE](LICENSE) (LGPL-3.0) and [COPYING](COPYING) (GPL-3.0, which it refers to), as in
+Baritone's own repository, which also carries [LICENSE-Part-2.jpg](LICENSE-Part-2.jpg), the "no anime" part of its
+"LGPL-3.0 with anime exception".
 
 It also builds on **Horizon** (https://github.com/horizon-rust/horizon) and **horizon-mixins**
 (MIT, by levzzz5154), and is not affiliated with Mojang, Microsoft or the Baritone authors.

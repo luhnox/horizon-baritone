@@ -95,4 +95,5 @@ Rules of this code, learned the hard way on Horizon:
 
 ## License
 
-Baritone is LGPL-3.0 and this is a derivative of it, so it is LGPL-3.0 as well. See [NOTICE.md](NOTICE.md).
+Baritone is LGPL-3.0 (with an anime exception, see its [LICENSE-Part-2.jpg](LICENSE-Part-2.jpg)) and this is a derivative of it,
+so it is LGPL-3.0 as well: [LICENSE](LICENSE), [COPYING](COPYING) and [NOTICE.md](NOTICE.md).
