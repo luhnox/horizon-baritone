@@ -33,9 +33,24 @@ The command names, aliases, descriptions and messages are Baritone 1.21.4's (`ba
 
 ## Install
 
-Download `baritone.hnmod` from the [latest release](https://github.com/luhnox/horizon-baritone/releases/latest) and
-install it in the launcher's native mods. The launcher builds it into a game of its own (10 to 30 minutes the
-first time). It runs native code with your rights: read the source first.
+A mod is built into the Horizon commit it is pinned to, so pick the download by the Nightly the launcher shows for your
+game (Versions tab). Every release is titled `Baritone <version> for Nightly <date>` and its file is named
+`baritone-<version>-nightly-<date>.hnmod`.
+
+| Your Nightly | Horizon commit | Baritone | Download |
+|---|---|---|---|
+| 2026-11-04 | `3fb4c31` | the latest | [latest release](https://github.com/luhnox/horizon-baritone/releases/latest) |
+| 2026-10-30 | `ba6344a` | 1.1.38 | [v1.1.38](https://github.com/luhnox/horizon-baritone/releases/tag/v1.1.38) |
+| 2026-10-28 | `142388e` | 1.1.30 | [v1.1.30](https://github.com/luhnox/horizon-baritone/releases/tag/v1.1.30) |
+
+A Nightly that is not in the table has no build yet: the mod reads the game's private state, so a new Nightly needs it ported.
+SeedCrackerX is pinned to the same commit as the latest Baritone, so the two build together on 2026-11-04 (not on the older
+ones, which only carry Baritone).
+
+Install the file in the launcher's native mods. The launcher builds it into a game of its own (10 to 30 minutes the
+first time). It runs native code with your rights: read the source first. A mod pinned to another Nightly than the others
+makes the launcher ask before it builds; a mod whose hooks no longer exist (AppleSkin, Eating Animation and Sunset on
+2026-11-04) stops the build, so turn those off.
 
 ```
 horizon-launcher native-build --trust-native-code

@@ -141,12 +141,12 @@ fn well(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, edge: u32, f: f32) {
 
 /// The switch: Baritone's purple under an I when it is on, dark under an O when it is off, the knob on the other half.
 fn switch(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, on: bool, hover: bool, f: f32, scale: f32) {
-    // Measured from the reference toggle (30 by 16 design pixels): a square knob 16 high, and beside it a cell 14 high that
-    // stands on the same bottom edge, so the knob rises 2 above it. The cell's far side is its own outline; the near side is the
-    // knob's, which is drawn over it.
+    // A square knob, and beside it a cell two pixels shorter that stands on the same bottom edge, so the knob rises above it.
+    // The cell's far side is its own outline; the near side is the knob's, which is drawn over it.
     let line = f.max(1.0).floor();
     let outline = if hover { WHITE } else { EDGE };
-    let (knob_w, cell_w, cell_h) = (16.0 * f, 15.0 * f, 14.0 * f);
+    let (knob_w, cell_h) = (r[3], r[3] - 2.0 * f);
+    let cell_w = r[2] - knob_w + line;
     let cell_y = r[1] + r[3] - cell_h;
     let (cell, knob) = if on {
         ([r[0], cell_y, cell_w, cell_h], [r[0] + r[2] - knob_w, r[1], knob_w, r[3]])
@@ -156,7 +156,11 @@ fn switch(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, on: bool, hover: bool
     fill(batch, atlas, cell, c(outline));
     let body = inset(cell, line);
     // The part of the cell the knob leaves showing, where the I or the O goes.
-    let shown = if on { [body[0], body[1], 14.0 * f - line, body[3]] } else { [r[0] + knob_w, body[1], 14.0 * f - line, body[3]] };
+    let shown = if on {
+        [body[0], body[1], knob[0] - body[0], body[3]]
+    } else {
+        [knob[0] + knob_w, body[1], body[0] + body[2] - knob[0] - knob_w, body[3]]
+    };
     if on {
         fill(batch, atlas, body, c(ACCENT_DEEP));
         fill(batch, atlas, [body[0], body[1], body[2], line], c(ACCENT_HOVER));
@@ -180,7 +184,7 @@ fn slider(batch: &mut HudBatch, atlas: &HudAtlas, t: Rect, steps: usize, at: Opt
         let x = bar[0] + bar[2] * i as f32 / (steps - 1) as f32;
         fill(batch, atlas, [x.floor(), bar[1], line, bar[3]], c(EDGE));
     }
-    let (kw, kh) = (9.0 * f, 11.0 * f);
+    let (kw, kh) = (7.0 * f, 9.0 * f);
     let knob = [(bar[0] + bar[2] * pos - kw / 2.0).round().max(t[0]), t[1] + t[3] / 2.0 - kh / 2.0, kw, kh];
     bevel(batch, atlas, knob, if hover { BUTTON_HOVER } else { BUTTON }, BUTTON_LIGHT, BUTTON_DARK, if hover { WHITE } else { EDGE }, line);
 }
@@ -270,7 +274,9 @@ pub fn draw(b: &mut Baritone, game: &Game<'_>, batch: &mut HudBatch) {
     let (f, t) = (l.scale, l.text);
     let line = f.max(1.0).floor();
     b.core.ui.clamp(&l);
-    let (state, settings) = (&b.core.ui, &b.core.settings);
+    let shake = b.core.ui.flash;
+    b.core.ui.flash = shake.saturating_sub(1);
+    let (state, settings) = (&b.core.ui, b.core.ui.shown(&b.core.settings));
     let view = state.rows();
     let rects = screen::rows(&l, &view, state.scroll);
     let hover = |r: Rect| ui::hovered(cursor, r[0], r[1], r[2], r[3]);
@@ -340,14 +346,15 @@ pub fn draw(b: &mut Baritone, game: &Game<'_>, batch: &mut HudBatch) {
                 picture(game, batch, item.icon, r[0] + 7.0 * f, top, 16.0, f);
                 let text_x = r[0] + 30.0 * f;
                 put(batch, atlas, item.label, text_x, top + 0.5 * f, t, c(WHITE), true, false);
-                let desc = screen::describe(item);
+                let note = if matches!(item.control, Control::BlockInput) { state.note.as_ref() } else { None };
+                let desc = note.map_or_else(|| screen::describe(item), |(text, _)| text.clone());
                 let room = match item.control {
                     Control::Steps(..) => r[2] - 40.0 * f,
                     Control::BlockInput => screen::block_field(&l, r)[0] - text_x - 6.0 * f,
                     Control::Choice(..) => screen::dropdown(&l, r)[0] - text_x - 6.0 * f,
                     _ => screen::switch(&l, r)[0] - text_x - 6.0 * f,
                 };
-                put(batch, atlas, &fitted(atlas, &desc, room, t * 0.8), text_x, top + 9.5 * t * 0.9 + f, t * 0.8, c(MUTED), false, false);
+                put(batch, atlas, &fitted(atlas, &desc, room, t * 0.8), text_x, top + 9.5 * t * 0.9 + f, t * 0.8, c(note.map_or(MUTED, |(_, failed)| if *failed { 0xFF6B6B } else { 0x7CE07C })), false, false);
                 match item.control {
                     Control::Toggle(_) | Control::Block(_) => {
                         let sw = screen::switch(&l, r);
@@ -392,15 +399,40 @@ pub fn draw(b: &mut Baritone, game: &Game<'_>, batch: &mut HudBatch) {
     batch.clip_since(start, l.list[0], l.list[1], l.list[0] + l.list[2], l.list[1] + l.list[3]);
     scrollbar(batch, atlas, l.frame, screen::content_height(&l, &view), state.scroll, f);
 
-    // The footer.
-    let over = hover(l.reset) && !dropdown_open;
-    button(batch, atlas, l.reset, "Reset page", over, false, f, t);
-    widgets::record("Reset page", l.reset, true);
-    widgets::widget_cursor(over, true);
-    let over = hover(l.done) && !dropdown_open;
-    button(batch, atlas, l.done, "Done", over, true, f, t);
-    widgets::record("Done", l.done, true);
-    widgets::widget_cursor(over, true);
+    // The footer: the page's defaults, or, while changes wait, the bar that asks to save them.
+    if state.dirty() {
+        // The bar shakes when the back button or Escape was pressed with changes waiting.
+        let dx = if shake == 0 { 0.0 } else if shake % 4 < 2 { 2.0 * f } else { -2.0 * f };
+        let at = |r: Rect| [r[0] + dx, r[1], r[2], r[3]];
+        let bar = at(l.bar);
+        fill(batch, atlas, bar, c(if shake > 0 { 0xE04646 } else { EDGE }));
+        fill(batch, atlas, inset(bar, line), c(0x1A1B1D));
+        let icon = [bar[0] + 7.0 * f, bar[1] + (bar[3] - 10.0 * f) / 2.0, 10.0 * f, 10.0 * f];
+        for r in [[icon[0] + 2.0 * f, icon[1], 6.0 * f, 10.0 * f], [icon[0], icon[1] + 2.0 * f, 10.0 * f, 6.0 * f], [icon[0] + f, icon[1] + f, 8.0 * f, 8.0 * f]] {
+            fill(batch, atlas, r, c(0xF0B323));
+        }
+        centered(batch, atlas, "!", icon, t * 0.9, c(INK), false, true);
+        let label = fitted(atlas, "Careful: unsaved changes!", at(l.bar_reset)[0] - icon[0] - 16.0 * f, t * 0.85);
+        left(batch, atlas, &label, icon[0] + 14.0 * f, bar, t * 0.85, c(WHITE), true);
+        let reset = at(l.bar_reset);
+        let over = hover(reset) && !dropdown_open;
+        centered(batch, atlas, "Reset", reset, t * 0.85, c(if over { WHITE } else { ACCENT_LIGHT }), false, false);
+        if over {
+            fill(batch, atlas, [reset[0] + 4.0 * f, reset[1] + reset[3] - 2.0 * f, reset[2] - 8.0 * f, line], c(WHITE));
+        }
+        widgets::record("Reset", reset, true);
+        widgets::widget_cursor(over, true);
+        let save = at(l.bar_save);
+        let over = hover(save) && !dropdown_open;
+        button(batch, atlas, save, "Save Changes", over, true, f, t * 0.85);
+        widgets::record("Save Changes", save, true);
+        widgets::widget_cursor(over, true);
+    } else {
+        let over = hover(l.reset) && !dropdown_open;
+        button(batch, atlas, l.reset, "Page defaults", over, false, f, t);
+        widgets::record("Page defaults", l.reset, true);
+        widgets::widget_cursor(over, true);
+    }
 
     // An open dropdown hangs over everything under it.
     if let Some(i) = state.open
@@ -413,6 +445,20 @@ pub fn draw(b: &mut Baritone, game: &Game<'_>, batch: &mut HudBatch) {
             button(batch, atlas, o, "", hover(o), current, f, t * 0.9);
             left(batch, atlas, &screen::pretty(value), o[0] + 6.0 * f, o, t * 0.9, ink(current), current);
             widgets::record(&screen::pretty(value), o, true);
+        }
+    }
+
+    // The blocks the text in the block field could be, under the field: picking one fills the field.
+    if state.focus == Some(Field::Block)
+        && !state.suggestions.is_empty()
+        && let Some(row) = view.iter().position(|v| matches!(v, View::Item(i) if matches!(i.control, Control::BlockInput)))
+    {
+        let field = screen::block_field(&l, rects[row]);
+        for (name, o) in state.suggestions.iter().zip(screen::suggestion_rects(field, state.suggestions.len())) {
+            button(batch, atlas, o, "", hover(o), false, f, t * 0.9);
+            picture(game, batch, name, o[0] + 3.0 * f, o[1] + (o[3] - 10.0 * f) / 2.0, 10.0, f);
+            left(batch, atlas, &fitted(atlas, name, o[2] - 18.0 * f, t * 0.9), o[0] + 16.0 * f, o, t * 0.9, ink(false), false);
+            widgets::record(name, o, true);
         }
     }
 

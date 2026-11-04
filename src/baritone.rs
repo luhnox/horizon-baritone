@@ -32,7 +32,7 @@ use std::cell::{Cell as FlagCell, RefCell};
 pub const ID: &str = "baritone";
 /// `SettingsUtil.SETTINGS_DEFAULT_NAME`, in the mod's data folder.
 pub const SETTINGS_DEFAULT_NAME: &str = "settings.txt";
-pub const VERSION: &str = "1.1.48";
+pub const VERSION: &str = "1.1.50";
 pub const DESCRIPTION: &str =
     "A Rust port of Baritone for Horizon: #goto, #mine, #farm, #build, #explore, #follow, #tunnel, #elytra and the rest, with bridging, pillaring, parkour, doors and water bucket landings.";
 
@@ -466,12 +466,25 @@ impl Baritone {
     fn page_click(&mut self, game: &mut Game<'_>, cursor: (f32, f32), size: (f32, f32), drag: bool) -> u8 {
         use super::baritone_screen::{self as screen, Action};
         let before = self.core.ui.category;
-        match self.core.ui.click(cursor, size, drag, &self.core.settings) {
+        let shown = self.core.ui.shown(&self.core.settings).clone();
+        match self.core.ui.click(cursor, size, drag, &shown) {
             Action::None => u8::from(self.core.ui.category != before),
             Action::Back => 2,
+            // A change waits in the screen's draft until Save Changes; nothing is applied or written before.
             Action::Set(name, value) => {
-                let _ = self.core.set_setting(game, name, &value);
+                let _ = self.core.ui.stage(&self.core.settings, name, &value);
                 u8::from(!drag)
+            }
+            Action::Save => {
+                for (name, value) in self.core.ui.take_changes() {
+                    let _ = self.core.set_setting(game, name, &value);
+                }
+                self.core.ui.note = None;
+                1
+            }
+            Action::Discard => {
+                self.core.ui.discard();
+                1
             }
             Action::Open(url) => {
                 super::baritone_notification::open_uri(url);
@@ -480,7 +493,7 @@ impl Baritone {
             Action::Reset(category) => {
                 for name in screen::reset_names(category) {
                     if let Some(def) = settings::find(name) {
-                        self.core.reset_setting(game, def);
+                        self.core.ui.stage_reset(&self.core.settings, def);
                     }
                 }
                 1
@@ -492,29 +505,56 @@ impl Baritone {
         }
     }
 
-    /// A block typed on the page joins the blocks Baritone may place, when the game has such a block.
+    /// Before each frame of the page: a row for every block added by name, and the blocks the block field could be.
+    fn page_sync(&mut self, game: &mut Game<'_>) {
+        use super::baritone_screen::{self as screen, Field, THROWAWAY};
+        let listed = self.core.ui.shown(&self.core.settings).list(THROWAWAY);
+        self.core.ui.set_custom(&listed);
+        if self.core.ui.focus != Some(Field::Block) {
+            self.core.ui.suggestions.clear();
+            return;
+        }
+        let text = self.core.ui.block.clone();
+        let mut found = screen::suggest(self.core.known_blocks(game), &text, 6);
+        // A name typed out in full, or picked, needs no offers.
+        let full = text.trim().to_lowercase().replace(' ', "_");
+        if found.iter().any(|b| *b == full.trim_start_matches("minecraft:")) {
+            found.clear();
+        }
+        self.core.ui.suggestions = found;
+    }
+
+    /// A block typed on the page joins the blocks Baritone may place, when the game has such a block. What came of it is told
+    /// in the row (and in chat), as a refusal only the chat saw looked like nothing happening.
     fn page_add_block(&mut self, game: &mut Game<'_>, word: &str) {
         use super::baritone_screen::THROWAWAY;
         let Some(full) = self.core.block_named(game, word) else {
-            self.core.say_red(game, &format!("There is no block called {word}."));
+            let text = format!("There is no block called {word}.");
+            self.core.say_red(game, &text);
+            self.core.ui.note = Some((text, true));
             return;
         };
         let name = full.trim_start_matches("minecraft:").to_owned();
-        let mut list = self.core.settings.list(THROWAWAY);
+        let mut list = self.core.ui.shown(&self.core.settings).list(THROWAWAY);
         if list.iter().any(|b| b.trim_start_matches("minecraft:") == name) {
-            self.core.say(game, &format!("{name} is already in the list."));
+            let text = format!("{name} is already in the list.");
+            self.core.say(game, &text);
+            self.core.ui.note = Some((text, true));
             return;
         }
         list.push(name.clone());
-        let _ = self.core.set_setting(game, THROWAWAY, &list.join(","));
-        self.core.say(game, &format!("{name} added to the blocks Baritone may place."));
+        let _ = self.core.ui.stage(&self.core.settings, THROWAWAY, &list.join(","));
+        self.core.ui.note = Some((format!("{name} added. Save Changes to keep it."), false));
     }
 
     /// A key on Baritone's page: true when a text field took it (Escape then does not leave the page).
     fn page_typed(&mut self, game: &mut Game<'_>, key: super::baritone_screen::Key, text: Option<&str>) -> bool {
         use super::baritone_screen::Action;
         // With no field up, every key but Escape is the page's and goes no further: Enter or Tab would press a widget under it.
-        let Some(action) = self.core.ui.key(key, text) else { return key != super::baritone_screen::Key::Escape };
+        let Some(action) = self.core.ui.key(key, text) else {
+            // Escape leaves the page as the back button does: not while changes wait, which shakes the bar instead.
+            return if key == super::baritone_screen::Key::Escape { !matches!(self.core.ui.leave(), Action::Back) } else { true };
+        };
         if let Action::AddBlock(word) = action {
             self.page_add_block(game, &word);
         }
@@ -812,7 +852,10 @@ pub fn page_open(game: &Game<'_>) -> bool {
 }
 
 pub fn page_draw(game: &mut Game<'_>, batch: &mut horizon_client::hud::HudBatch) {
-    with(game, |b, game| super::baritone_settings_ui::draw(b, game, batch));
+    with(game, |b, game| {
+        b.page_sync(game);
+        super::baritone_settings_ui::draw(b, game, batch);
+    });
 }
 
 /// Characters typed on the page: a field takes them, and with none up they are dropped.

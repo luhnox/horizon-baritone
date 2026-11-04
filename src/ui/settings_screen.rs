@@ -27,6 +27,7 @@ pub enum Control {
     ResetAll,
 }
 
+#[derive(Debug)]
 pub struct Item {
     pub label: &'static str,
     /// What the row says under its title; empty takes the first sentence of the setting's own description.
@@ -350,6 +351,39 @@ pub enum View {
     Item(&'static Item),
 }
 
+/// The row of a block the player typed in, made once for each name and kept: a row is a `&'static Item`.
+fn custom_item(name: &str) -> &'static Item {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static POOL: OnceLock<Mutex<HashMap<String, &'static Item>>> = OnceLock::new();
+    let mut pool = POOL.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    pool.entry(name.to_owned()).or_insert_with(|| {
+        let id: &'static str = Box::leak(name.to_owned().into_boxed_str());
+        let label: &'static str = Box::leak(format!("Place {}", name.replace('_', " ")).into_boxed_str());
+        Box::leak(Box::new(Item { label, desc: "", icon: id, control: Control::Block(id) }))
+    })
+}
+
+fn is_preset_block(name: &str) -> bool {
+    CATEGORIES.iter().flat_map(|c| c.rows).any(|r| matches!(r, Row::Item(Item { control: Control::Block(b), .. }) if *b == name))
+}
+
+/// Up to `max` of `blocks` (`minecraft:` names) that `text` is part of, those it starts with first.
+pub fn suggest(blocks: &[String], text: &str, max: usize) -> Vec<String> {
+    let text = bare(&text.to_lowercase()).replace(' ', "_");
+    if text.is_empty() {
+        return Vec::new();
+    }
+    let mut found: Vec<&str> = blocks.iter().map(|b| bare(b)).filter(|b| b.contains(&text)).collect();
+    found.sort_by_key(|b| (!b.starts_with(&text), b.len()));
+    found.into_iter().take(max).map(str::to_owned).collect()
+}
+
+/// The rows under a text field that offers `count` blocks to pick from.
+pub fn suggestion_rects(field: Rect, count: usize) -> Vec<Rect> {
+    dropdown_options(field, count)
+}
+
 fn matches(item: &Item, query: &str) -> bool {
     let name = setting_of(item.control).unwrap_or("");
     let block = if let Control::Block(b) = item.control { b } else { "" };
@@ -357,6 +391,11 @@ fn matches(item: &Item, query: &str) -> bool {
 }
 
 pub fn view(category: usize, query: &str) -> Vec<View> {
+    view_with(category, query, &[])
+}
+
+/// The blocks the player added by name come after the field that adds them, under a heading of their own.
+pub fn view_with(category: usize, query: &str, custom: &[&'static Item]) -> Vec<View> {
     let query = query.trim().to_lowercase();
     let mut out = Vec::new();
     if query.is_empty() {
@@ -365,6 +404,12 @@ pub fn view(category: usize, query: &str) -> Vec<View> {
                 Row::Heading(text) => View::Heading(text),
                 Row::Item(i) => View::Item(i),
             });
+            if let Row::Item(Item { control: Control::BlockInput, .. }) = row
+                && !custom.is_empty()
+            {
+                out.push(View::Heading("Your blocks"));
+                out.extend(custom.iter().map(|i| View::Item(i)));
+            }
         }
     } else {
         for cat in CATEGORIES {
@@ -376,6 +421,7 @@ pub fn view(category: usize, query: &str) -> Vec<View> {
                 }
             }
         }
+        out.extend(custom.iter().filter(|i| matches(i, &query)).map(|i| View::Item(i)));
     }
     let count = out.iter().filter(|r| matches!(r, View::Item(_))).count();
     out.insert(0, View::Count(count));
@@ -395,9 +441,10 @@ pub const HEADING_H: f32 = 16.0;
 pub const COUNT_H: f32 = 14.0;
 pub const TAB_H: f32 = 16.0;
 pub const TAB_PITCH: f32 = 19.0;
-pub const CONTROL_H: f32 = 14.0;
-/// The switch is two squares side by side, as tall as the reference's: 30 by 16.
-pub const SWITCH_H: f32 = 16.0;
+pub const CONTROL_H: f32 = 12.0;
+/// The switch is a square knob beside a cell: 24 by 13.
+pub const SWITCH_H: f32 = 13.0;
+pub const SWITCH_W: f32 = 24.0;
 
 pub struct Layout {
     /// GUI pixels for each pixel of the 480 by 270 design.
@@ -412,8 +459,12 @@ pub struct Layout {
     pub frame: Rect,
     /// Where the rows scroll.
     pub list: Rect,
+    /// "Page defaults", at the right of the footer while nothing is waiting to be saved.
     pub reset: Rect,
-    pub done: Rect,
+    /// The bar that stands in the footer while there are changes: a warning, Reset (take them back) and Save Changes.
+    pub bar: Rect,
+    pub bar_reset: Rect,
+    pub bar_save: Rect,
 }
 
 pub fn layout(width: f32, height: f32) -> Layout {
@@ -430,8 +481,10 @@ pub fn layout(width: f32, height: f32) -> Layout {
         tabs: (0..CATEGORIES.len()).map(|i| r(28.0, 46.0 + i as f32 * TAB_PITCH, 92.0, TAB_H)).collect(),
         frame: r(126.0, 44.0, 327.0, 182.0),
         list: r(128.0, 46.0, 323.0, 178.0),
-        reset: r(274.0, 231.0, 86.0, 16.0),
-        done: r(366.0, 231.0, 86.0, 16.0),
+        reset: r(366.0, 232.0, 86.0, 14.0),
+        bar: r(126.0, 229.0, 327.0, 20.0),
+        bar_reset: r(327.0, 232.0, 36.0, 14.0),
+        bar_save: r(369.0, 232.0, 78.0, 14.0),
     }
 }
 
@@ -474,20 +527,20 @@ pub fn at_right(l: &Layout, row: Rect, w: f32) -> Rect {
 
 pub fn switch(l: &Layout, row: Rect) -> Rect {
     let f = l.scale;
-    [row[0] + row[2] - 14.0 * f - 30.0 * f, row[1] + (row[3] - SWITCH_H * f) / 2.0, 30.0 * f, SWITCH_H * f]
+    [row[0] + row[2] - 14.0 * f - SWITCH_W * f, row[1] + (row[3] - SWITCH_H * f) / 2.0, SWITCH_W * f, SWITCH_H * f]
 }
 
 pub fn open_button(l: &Layout, row: Rect) -> Rect {
-    at_right(l, row, 50.0)
+    at_right(l, row, 44.0)
 }
 
 pub fn dropdown(l: &Layout, row: Rect) -> Rect {
-    at_right(l, row, 104.0)
+    at_right(l, row, 96.0)
 }
 
 /// The Add button of a block field.
 pub fn add_button(l: &Layout, row: Rect) -> Rect {
-    at_right(l, row, 40.0)
+    at_right(l, row, 36.0)
 }
 
 /// The text field of a block field: from the title's column to the Add button.
@@ -521,8 +574,12 @@ pub enum Action {
     Reset(Option<usize>),
     /// A block typed into the field.
     AddBlock(String),
-    /// The back button or Done: back to Options > Mods.
+    /// The back button, with nothing waiting to be saved: back to Options > Mods.
     Back,
+    /// Save Changes: what was changed is applied and kept.
+    Save,
+    /// Reset in the bar: the changes are taken back.
+    Discard,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -550,11 +607,92 @@ pub struct SettingsScreen {
     pub focus: Option<Field>,
     pub search: String,
     pub block: String,
+    /// The blocks added by name that are not one of the page's own switches.
+    pub custom: Vec<&'static Item>,
+    /// Blocks that the text in the block field could be, to pick from.
+    pub suggestions: Vec<String>,
+    /// What the last Add did, to show in the row: the words, and whether it failed.
+    pub note: Option<(String, bool)>,
+    /// The settings as they would be with the changes made so far; None while there are none.
+    pub draft: Option<Settings>,
+    /// The settings that differ in the draft from the saved ones.
+    pub changed: Vec<&'static str>,
+    /// Frames the bar has left to shake: the back button was pressed with changes waiting.
+    pub flash: u8,
 }
 
 impl SettingsScreen {
+    pub fn dirty(&self) -> bool {
+        !self.changed.is_empty()
+    }
+
+    /// The settings the page shows: the draft when there are changes, else the saved ones.
+    pub fn shown<'a>(&'a self, saved: &'a Settings) -> &'a Settings {
+        self.draft.as_ref().unwrap_or(saved)
+    }
+
+    /// Makes a change in the draft (the saved settings stay as they are until Save); a change that puts the setting back as it
+    /// was is no change.
+    pub fn stage(&mut self, saved: &Settings, name: &'static str, value: &str) -> Result<(), String> {
+        let mut draft = self.draft.take().unwrap_or_else(|| saved.clone());
+        let done = draft.set(name, value).map(|_| ());
+        self.draft = Some(draft);
+        self.settle(saved, name);
+        done
+    }
+
+    /// A setting back to its default, in the draft.
+    pub fn stage_reset(&mut self, saved: &Settings, def: &'static settings::Def) {
+        let mut draft = self.draft.take().unwrap_or_else(|| saved.clone());
+        draft.reset(def);
+        self.draft = Some(draft);
+        self.settle(saved, def.name);
+    }
+
+    fn settle(&mut self, saved: &Settings, name: &'static str) {
+        let same = self.draft.as_ref().is_some_and(|d| d.get(name) == saved.get(name));
+        self.changed.retain(|c| *c != name);
+        if !same {
+            self.changed.push(name);
+        }
+        if self.changed.is_empty() {
+            self.draft = None;
+        }
+    }
+
+    /// Takes the changes back.
+    pub fn discard(&mut self) {
+        self.draft = None;
+        self.changed.clear();
+    }
+
+    /// The changes to apply on Save, each with its value; the draft is spent.
+    pub fn take_changes(&mut self) -> Vec<(&'static str, String)> {
+        let draft = self.draft.take();
+        let names = std::mem::take(&mut self.changed);
+        names.into_iter().filter_map(|n| draft.as_ref().map(|d| (n, d.get(n).to_owned()))).collect()
+    }
+
+    /// The back button or Escape: leaves, unless changes are waiting, which shakes the bar instead.
+    pub fn leave(&mut self) -> Action {
+        if self.dirty() {
+            self.flash = 24;
+            Action::None
+        } else {
+            Action::Back
+        }
+    }
+
     pub fn rows(&self) -> Vec<View> {
-        view(self.category, &self.search)
+        view_with(self.category, &self.search, &self.custom)
+    }
+
+    /// The blocks of the list that have no switch of their own get a row each.
+    pub fn set_custom(&mut self, listed: &[String]) {
+        let mut names: Vec<&str> = listed.iter().map(|b| bare(b)).filter(|b| !b.is_empty() && !is_preset_block(b)).collect();
+        names.sort_unstable();
+        names.dedup();
+        self.custom = names.into_iter().map(custom_item).collect();
     }
 
     pub fn clamp(&mut self, l: &Layout) {
@@ -595,10 +733,29 @@ impl SettingsScreen {
                 return Action::None;
             }
         }
-        if inside(cursor, l.back) || inside(cursor, l.done) {
-            return Action::Back;
+        // A suggestion under the block field fills the field with that block.
+        if self.focus == Some(Field::Block)
+            && let Some(row) = view.iter().position(|v| matches!(v, View::Item(Item { control: Control::BlockInput, .. })))
+        {
+            let picked = suggestion_rects(block_field(&l, rects[row]), self.suggestions.len()).iter().position(|r| inside(cursor, *r));
+            if let Some(i) = picked {
+                self.block = self.suggestions[i].clone();
+                self.suggestions.clear();
+                self.note = None;
+                return Action::None;
+            }
         }
-        if inside(cursor, l.reset) {
+        if inside(cursor, l.back) {
+            return self.leave();
+        }
+        if self.dirty() {
+            if inside(cursor, l.bar_save) {
+                return Action::Save;
+            }
+            if inside(cursor, l.bar_reset) {
+                return Action::Discard;
+            }
+        } else if inside(cursor, l.reset) {
             return Action::Reset(Some(self.category));
         }
         if inside(cursor, l.search) {
@@ -663,7 +820,12 @@ impl SettingsScreen {
         let lower = self.block.trim().to_lowercase();
         let name = lower.trim_start_matches("minecraft:").replace(' ', "_");
         self.block.clear();
-        if name.is_empty() { Action::None } else { Action::AddBlock(name) }
+        if name.is_empty() {
+            self.note = Some(("Type a block name first.".to_owned(), true));
+            Action::None
+        } else {
+            Action::AddBlock(name)
+        }
     }
 
     /// A key while the screen is up: None when it is not for a field (Escape then leaves the screen as it always does).
@@ -683,6 +845,7 @@ impl SettingsScreen {
                     }
                     Field::Block => {
                         self.block.pop();
+                        self.note = None;
                     }
                 }
             }
@@ -695,6 +858,9 @@ impl SettingsScreen {
                     if target.chars().count() < max {
                         target.push(ch);
                     }
+                }
+                if field == Field::Block {
+                    self.note = None;
                 }
                 // A new search starts at the top; a block being typed leaves the list where it is.
                 if field == Field::Search {
@@ -868,7 +1034,7 @@ mod tests {
     fn the_screen_fits_its_window_at_every_size_and_keeps_the_design_proportions() {
         for (w, h) in [(480.0, 270.0), (960.0, 540.0), (1280.0, 480.0), (640.0, 360.0), (320.0, 180.0)] {
             let l = layout(w, h);
-            let mut inner = vec![l.header, l.back, l.search, l.frame, l.list, l.reset, l.done];
+            let mut inner = vec![l.header, l.back, l.search, l.frame, l.list, l.reset, l.bar, l.bar_reset, l.bar_save];
             inner.extend(l.tabs.iter().copied());
             for r in inner {
                 assert!(r[0] >= l.panel[0] - 0.01 && r[1] >= l.panel[1] - 0.01, "{r:?} at {w}x{h}");
@@ -877,7 +1043,8 @@ mod tests {
             assert!(l.back[0] + l.back[2] < l.search[0]);
             assert!(l.tabs[0][0] + l.tabs[0][2] <= l.frame[0]);
             assert!(l.frame[1] + l.frame[3] <= l.reset[1]);
-            assert!(l.reset[0] + l.reset[2] < l.done[0]);
+            assert!(l.bar_reset[0] + l.bar_reset[2] < l.bar_save[0] && l.bar[0] < l.bar_reset[0]);
+            assert!(l.bar[1] >= l.frame[1] + l.frame[3] - 0.01, "the bar stands under the list");
             assert!(l.header[1] + l.header[3] <= l.tabs[0][1] && l.header[1] + l.header[3] <= l.frame[1]);
             for pair in l.tabs.windows(2) {
                 assert!(pair[0][1] + pair[0][3] <= pair[1][1]);
@@ -942,7 +1109,6 @@ mod tests {
         assert_eq!((screen.category, screen.scroll, screen.search.as_str()), (1, 0.0, ""));
         // The footer, the back button, and a press on nothing.
         assert_eq!(screen.click(center(l.reset), size, false, &s), Action::Reset(Some(1)));
-        assert_eq!(screen.click(center(l.done), size, false, &s), Action::Back);
         assert_eq!(screen.click(center(l.back), size, false, &s), Action::Back);
         assert_eq!(screen.click((0.0, 0.0), size, false, &s), Action::None);
         // A link opens from its button only; Reset everything too.
@@ -976,12 +1142,101 @@ mod tests {
         assert_eq!(screen.click(center(button), size, false, &s), Action::None);
         assert_eq!(screen.open, None);
         screen.click(center(button), size, false, &s);
-        assert_eq!(screen.click(center(l.done), size, false, &s), Action::Back);
+        assert_eq!(screen.click(center(l.back), size, false, &s), Action::Back);
         assert_eq!(screen.open, None);
         // The wheel closes it too.
         screen.click(center(button), size, false, &s);
         screen.wheel(1.0, &l);
         assert_eq!(screen.open, None);
+    }
+
+    #[test]
+    fn changes_wait_in_a_draft_until_saved_and_back_does_not_leave_with_them() {
+        let saved = defaults();
+        let size = (480.0, 270.0);
+        let l = layout(size.0, size.1);
+        let mut screen = SettingsScreen::default();
+        assert!(!screen.dirty());
+        screen.stage(&saved, "allowSprint", "false").unwrap();
+        assert!(screen.dirty());
+        assert_eq!(screen.changed, ["allowSprint"]);
+        assert!(saved.flag("allowSprint"), "the saved settings are untouched");
+        assert!(!screen.shown(&saved).flag("allowSprint"), "the page shows the change");
+        assert_eq!(screen.click((l.reset[0] + 0.5, l.reset[1] + 0.5), size, false, &saved), Action::None, "page defaults is hidden under the bar");
+        assert_eq!(screen.click(center(l.back), size, false, &saved), Action::None);
+        assert_eq!(screen.flash, 24);
+        assert_eq!(screen.leave(), Action::None);
+        screen.stage(&saved, "allowSprint", "true").unwrap();
+        assert!(!screen.dirty() && screen.draft.is_none(), "putting it back as it was is no change");
+        screen.stage(&saved, "allowSprint", "false").unwrap();
+        screen.stage(&saved, "allowBreak", "false").unwrap();
+        assert_eq!(screen.click(center(l.bar_reset), size, false, &saved), Action::Discard);
+        screen.discard();
+        assert!(!screen.dirty() && screen.draft.is_none());
+        screen.stage(&saved, "allowSprint", "false").unwrap();
+        screen.stage(&saved, "allowBreak", "false").unwrap();
+        assert_eq!(screen.click(center(l.bar_save), size, false, &saved), Action::Save);
+        let mut taken = screen.take_changes();
+        taken.sort();
+        assert_eq!(taken, [("allowBreak", "false".to_owned()), ("allowSprint", "false".to_owned())]);
+        assert!(!screen.dirty() && screen.draft.is_none());
+        assert_eq!(screen.click(center(l.back), size, false, &saved), Action::Back, "nothing waiting: back leaves");
+        assert!(screen.stage(&saved, "allowSprint", "maybe").is_err(), "a value that does not parse is refused");
+        assert!(!screen.dirty());
+    }
+
+    #[test]
+    fn typing_a_block_offers_names_and_picking_one_fills_the_field() {
+        let blocks: Vec<String> = ["minecraft:tuff", "minecraft:tuff_slab", "minecraft:chiseled_tuff", "minecraft:stone", "minecraft:sand"].map(String::from).to_vec();
+        assert_eq!(suggest(&blocks, "tuff", 6), ["tuff", "tuff_slab", "chiseled_tuff"], "prefix first, then shorter names");
+        assert_eq!(suggest(&blocks, " Minecraft:TUFF s", 6), ["tuff_slab"], "case, prefix and spaces do not matter");
+        assert_eq!(suggest(&blocks, "tuff_s", 6), ["tuff_slab"]);
+        assert_eq!(suggest(&blocks, "", 6), Vec::<String>::new());
+        assert_eq!(suggest(&blocks, "t", 2).len(), 2, "at most the number asked for");
+        let s = defaults();
+        let size = (480.0, 270.0);
+        let l = layout(size.0, size.1);
+        let mut screen = SettingsScreen { category: 1, ..Default::default() };
+        let row = row_of(&screen, "Another block");
+        scroll_to(&mut screen, &l, row);
+        let rects = rows(&l, &screen.rows(), screen.scroll);
+        let field = block_field(&l, rects[row]);
+        screen.click(center(field), size, false, &s);
+        screen.suggestions = suggest(&blocks, "tuff", 6);
+        let pick = suggestion_rects(field, screen.suggestions.len());
+        assert_eq!(screen.click(center(pick[1]), size, false, &s), Action::None);
+        assert_eq!(screen.block, "tuff_slab", "the pick is in the field");
+        assert_eq!(screen.focus, Some(Field::Block), "and the field keeps the keys");
+        assert!(screen.suggestions.is_empty());
+        assert_eq!(screen.click(center(add_button(&l, rects[row])), size, false, &s), Action::AddBlock("tuff_slab".into()));
+    }
+
+    #[test]
+    fn an_added_block_gets_a_row_of_its_own_and_an_empty_add_says_so() {
+        let mut screen = SettingsScreen { category: 1, ..Default::default() };
+        let before = screen.rows().len();
+        screen.set_custom(&["dirt".to_owned(), "minecraft:tuff".to_owned(), "tuff".to_owned(), "bricks".to_owned(), "cobbled_deepslate".to_owned()]);
+        assert_eq!(screen.custom.len(), 2, "dirt has a switch already and a name is listed once");
+        let listed = screen.rows();
+        assert_eq!(listed.len(), before + 3, "a heading and a row for each");
+        assert!(listed.iter().any(|r| matches!(r, View::Heading("Your blocks"))));
+        let s = defaults();
+        let tuff = screen.custom.iter().find(|i| i.icon == "tuff").unwrap();
+        assert_eq!(tuff.label, "Place tuff");
+        assert_eq!(change(tuff.control, &s), Some((THROWAWAY, "dirt,cobblestone,netherrack,stone,tuff".to_owned())));
+        screen.search = "tuff".into();
+        assert!(screen.rows().iter().any(|r| matches!(r, View::Item(i) if i.icon == "tuff")), "a search finds it too");
+        screen.search.clear();
+        let size = (480.0, 270.0);
+        let l = layout(size.0, size.1);
+        let row = row_of(&screen, "Another block");
+        scroll_to(&mut screen, &l, row);
+        let rects = rows(&l, &screen.rows(), screen.scroll);
+        assert_eq!(screen.click(center(add_button(&l, rects[row])), size, false, &s), Action::None);
+        assert_eq!(screen.note, Some(("Type a block name first.".to_owned(), true)));
+        screen.focus = Some(Field::Block);
+        screen.key(Key::Other, Some("t"));
+        assert_eq!(screen.note, None, "typing takes the note away");
     }
 
     #[test]
