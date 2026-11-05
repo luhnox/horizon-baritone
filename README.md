@@ -54,6 +54,19 @@ A `release` build (`horizon-launcher settings native-profile release`) is recomm
 game's start function too large for the default 2 MB stack (`tools/patch_stack.py` raises it for a `fast` build).
 To make the file yourself, `python tools/pack.py` writes `dist/baritone.hnmod`.
 
+### Signing key
+
+The versions in the Horizon registry (horizon-rust/horizon-mods) are signed with a [minisign](https://jedisct1.github.io/minisign/) key
+of the author of this port (luhnox). Since 2026-11-05 the key is
+
+```
+RWTHPH49xk0RxlR1W1RZwYeuLJjnGPW0U/nElRyWuiDh6S1zz9ey1QTj
+```
+
+(`minisign -Vm <file>.hnmod -P <the key>` checks a file). It replaces the key of 1.1.38, whose secret half was lost; the
+registry entry is changed by a pull request opened from the GitHub account `luhnox`, the owner the entry names, and this paragraph,
+committed to the repository the entry names as its source, is the second place the new key is recorded.
+
 ## Layout
 
 ```
