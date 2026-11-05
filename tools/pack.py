@@ -39,7 +39,10 @@ def pack(path, pin):
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr(zipfile.ZipInfo('horizon-native.json', stamp), json.dumps(entry, indent=2, sort_keys=True) + '\n')
         for f in files + ['LICENSE']:
-            data = open(f, 'rb').read()
+            # Line endings as the repository stores them (LF), whatever the checkout has: the same bytes on every machine.
+            data = open(f, 'rb').read().replace(b'
+', b'
+')
             if f == 'horizon-mixin.toml':
                 data = re.sub(rb'horizon_revision = "[0-9a-f]{40}"', b'horizon_revision = "' + pin.encode() + b'"', data)
             z.writestr(zipfile.ZipInfo('mixins/baritone/' + f, stamp), data)
