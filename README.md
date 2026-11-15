@@ -104,7 +104,7 @@ To check against the game itself, `tools/dev-sync.sh` applies the bundle to a co
 source (it needs `cargo` on `PATH`, `HORIZON_WORK` and `HORIZON_LAUNCHER`), and a normal
 `cargo check -p horizon-client --locked` in that copy checks the game integration;
 `cargo build -p horizon-client --release` builds a game to try it in. This Horizon revision has no `mods` Cargo feature.
-The helper selects the mixin tool revision from `horizon-native.json` (`5a64af938ec8`).
+The helper selects the mixin tool revision from `horizon-native.json` (`e59da9094f0c`).
 
 Rules of this code, learned the hard way on Horizon:
 
