@@ -4,7 +4,7 @@ The .hnmod is a zip of horizon-native.json (the registry entry), horizon-mixin.t
 toml names as a `source` or a `helper`, and the LICENSE, under mixins/baritone/. Run it from the repository root:
 
     python tools/pack.py                    # pinned to the commit in horizon-native.json
-    python tools/pack.py 6475f62f3c83...    # also one file for each other Horizon commit given (40 letters)
+    python tools/pack.py <40-character-horizon-commit>    # also one file for each other Horizon commit given (40 letters)
 
 A mod is built into the Horizon commit it is pinned to, so each Nightly a player can be on needs a file of its own, and the file says
 which: dist/baritone-<version>-nightly-<date>-<7 letters of the commit>.hnmod, the way the launcher's Versions tab shows it.
@@ -12,7 +12,7 @@ Only pin a commit the sources were checked against (the mixin tool applies them 
 """
 import json
 import re
-import shutil
+from pathlib import Path
 import sys
 import zipfile
 
@@ -22,6 +22,7 @@ NIGHTLIES = {
     '294448014fba585f8d5d09dd8886f482493b6417': '2026-11-03',
     '3fb4c3138e0c5d8fdd2fdb555cf31368e8897497': '2026-11-04',
     '6475f62f3c834b7489e1816bf47f47ea5eb2b879': '2026-11-04',
+    '9f42064c11efe7ef3e5ed2baad7ddc2a3b36eea0': '2026-11-13',
 }
 
 toml = open('horizon-mixin.toml', encoding='utf-8').read()
@@ -51,6 +52,7 @@ def named(pin):
     return f"dist/baritone-{version}-nightly-{when}-{pin[:7]}.hnmod" if when else f"dist/baritone-{version}-horizon-{pin[:7]}.hnmod"
 
 
+Path('dist').mkdir(exist_ok=True)
 pack('dist/baritone.hnmod', meta['horizon'])
 print(version, len(files) + 1, 'files ->', 'dist/baritone.hnmod')
 for pin in [meta['horizon']] + sys.argv[1:]:

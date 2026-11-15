@@ -1,12 +1,12 @@
 [mod]
 id = "baritone"
-version = "1.1.52"
+version = "1.1.53"
 priority = 100
 
 # The commit this was written against: the Horizon the instance plays. It uses the native hook
 # points (NATIVE_HOOKS_API 1) and reads the game's world, so it names the commit it needs.
 [compatibility]
-horizon_revision = "6475f62f3c834b7489e1816bf47f47ea5eb2b879"
+horizon_revision = "9f42064c11efe7ef3e5ed2baad7ddc2a3b36eea0"
 
 [[module]]
 id = "mod_utils"
@@ -791,7 +791,7 @@ bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *s
 [[injection]]
 id = "click_press"
 kind = "HEAD"
-target = "horizon_client::game::tweaks::Game<'_>::sort_mouse_press"
+target = "horizon_client::game::extras::sorting::Game<'_>::sort_mouse_press"
 helper = "hooks/click_press.rs"
 bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
 
@@ -800,7 +800,7 @@ bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *s
 id = "click_escape"
 kind = "HEAD"
 cancellable = true
-target = "horizon_client::game::tweaks::Game<'_>::sort_key_press"
+target = "horizon_client::game::extras::sorting::Game<'_>::sort_key_press"
 helper = "hooks/click_escape.rs"
 bindings = [
   { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },

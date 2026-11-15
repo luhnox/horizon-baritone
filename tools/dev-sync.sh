@@ -6,8 +6,10 @@ set -e
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 : "${HORIZON_WORK:?set HORIZON_WORK to a scratch folder}"
 : "${HORIZON_LAUNCHER:?set HORIZON_LAUNCHER to the horizon-launcher data folder}"
-# The Horizon commit the bundle pins (horizon-mixin.toml); HORIZON_REV tries another, and HORIZON_SRC names the folder that holds its source.
-REV=${HORIZON_REV:-6475f62f3c834b7489e1816bf47f47ea5eb2b879}
+# The Horizon commit the bundle pins (horizon-native.json); HORIZON_REV tries another, and HORIZON_SRC names the folder that holds its source.
+PIN=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["horizon"])' "$REPO/horizon-native.json")
+REV=${HORIZON_REV:-$PIN}
+MIXINS=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["mixins"][:12])' "$REPO/horizon-native.json")
 D="$HORIZON_WORK/mods/baritone/mixins/baritone"
 rm -rf "$D"; mkdir -p "$D"
 cp "$REPO/horizon-mixin.toml" "$D/"
@@ -16,7 +18,7 @@ sed -i "s/horizon_revision = \"[0-9a-f]\{40\}\"/horizon_revision = \"$REV\"/" "$
 cp -r "$REPO/src" "$REPO/hooks" "$D/"
 cd "$HORIZON_WORK"
 rm -rf stage-new
-"$(ls "$HORIZON_LAUNCHER"/native/tools/*/bin/horizon-mixins.exe | head -1)" apply \
+"$HORIZON_LAUNCHER/native/tools/$MIXINS/bin/horizon-mixins.exe" apply \
   --workspace "${HORIZON_SRC:-$HORIZON_LAUNCHER/native/source/$REV}" --mods mods/baritone/mixins --out stage-new
 python - <<'PY'
 import filecmp, os, shutil

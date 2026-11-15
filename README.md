@@ -16,7 +16,7 @@ world, collision and input code.
 > flowers, crops, dirt) walk the surface looking for it instead of digging down to the strip-mining height, which is where the Java goes
 > whatever the block is. Ores, ancient debris, the deepslate layer and the like still branch underground as in the Java.
 
-Pinned to Horizon commit `6475f62f3c834b7489e1816bf47f47ea5eb2b879` (Nightly 2026-11-04 `6475f62`, the newest), the same one SeedCrackerX is pinned to, so the two build together. Only the newest Nightly is kept up to date; releases before 1.1.50 are for older Nightlies and say which in their title. The mod reads the
+Pinned to Horizon commit `9f42064c11efe7ef3e5ed2baad7ddc2a3b36eea0` (Nightly 2026-11-13 `9f42064`). Version 1.1.53 targets this Nightly; earlier mod versions target older Nightlies. The mod reads the
 game's private state, so a later Nightly may need it ported.
 
 ## Using it
@@ -33,18 +33,16 @@ The command names, aliases, descriptions and messages are Baritone 1.21.4's (`ba
 
 ## Install
 
-A mod is built into the Horizon commit it is pinned to. Only the newest Nightly is supported, so there is one download: the
-release is titled `Baritone <version> for Nightly <date> (<7 letters>)` and its file is named
+A mod is built into the Horizon commit it is pinned to. Published releases are titled `Baritone <version> for Nightly <date> (<7 letters>)` and their files are named
 `baritone-<version>-nightly-<date>-<7 letters>.hnmod`, the date and the 7 letters the launcher shows in its Versions tab.
 
 | Nightly in the launcher | Baritone | Download |
 |---|---|---|
-| 2026-11-04 `6475f62` (up to date) | the latest | [latest release](https://github.com/luhnox/horizon-baritone/releases/latest), file `baritone-<version>-nightly-2026-11-04-6475f62.hnmod` |
+| 2026-11-13 `9f42064` | 1.1.53 | Build with `python tools/pack.py`: `dist/baritone-1.1.53-nightly-2026-11-13-9f42064.hnmod` |
 
 Install the file in the launcher's native mods and use the same Nightly for the game, so the launcher builds on the source it
 already has. The build takes 10 to 30 minutes the first time. It runs native code with your rights: read the source first. A mod
-pinned to another Nightly makes the launcher ask before it builds; a mod whose hooks no longer exist (AppleSkin, Eating
-Animation and Sunset on 2026-11-04) stops the build, so turn those off.
+pinned to another Nightly makes the launcher ask before it builds; disable other mods whose hooks no longer exist on this Nightly.
 
 ```
 horizon-launcher native-build --trust-native-code
@@ -104,7 +102,9 @@ python tools/pack.py        # rebuild dist/baritone.hnmod from horizon-mixin.tom
 
 To check against the game itself, `tools/dev-sync.sh` applies the bundle to a copy of the pinned Horizon
 source (it needs `cargo` on `PATH`, `HORIZON_WORK` and `HORIZON_LAUNCHER`), and a normal
-`cargo build -p horizon-client --features horizon-client/mods` in that copy builds a game to try it in.
+`cargo check -p horizon-client --locked` in that copy checks the game integration;
+`cargo build -p horizon-client --release` builds a game to try it in. This Horizon revision has no `mods` Cargo feature.
+The helper selects the mixin tool revision from `horizon-native.json` (`5a64af938ec8`).
 
 Rules of this code, learned the hard way on Horizon:
 
